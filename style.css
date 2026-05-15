@@ -1,0 +1,533 @@
+/* =====================================================================
+   Chordz – style.css
+   Dark musical theme, responsive layout
+   ===================================================================== */
+
+/* ----- Custom properties -------------------------------------------- */
+:root {
+  --bg:          #12121f;
+  --surface:     #1c1c32;
+  --card:        #252545;
+  --card-hover:  #2e2e58;
+  --border:      #35355a;
+  --accent:      #7b61ff;   /* purple */
+  --accent2:     #f5a623;   /* gold */
+  --accent3:     #e94560;   /* rose */
+  --success:     #2ecc71;
+  --danger:      #e74c3c;
+  --text:        #e8e8f0;
+  --text-muted:  #7a7a9d;
+  --radius:      8px;
+  --radius-lg:   12px;
+  --shadow:      0 2px 10px rgba(0,0,0,.45);
+  --transition:  160ms ease;
+
+  /* Section accent colours by type */
+  --c-verse:    #3a5fbf;
+  --c-chorus:   #b8550a;
+  --c-bridge:   #6b2f9e;
+  --c-middle8:  #0e7a6e;
+  --c-change:   #9e3333;
+  --c-outro:    #3a6b3a;
+  --c-custom:   #55557a;
+}
+
+/* ----- Reset / base -------------------------------------------------- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  min-height: 100vh;
+  padding-bottom: 5rem;
+}
+
+/* ----- Scrollbar (Chrome/Safari) ------------------------------------- */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--surface); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ----- Typography ---------------------------------------------------- */
+h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: .04em; }
+h2 { font-size: 1.1rem; font-weight: 600; }
+
+/* ----- Buttons ------------------------------------------------------- */
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: var(--radius);
+  font-family: inherit;
+  font-size: .85rem;
+  font-weight: 600;
+  transition: background var(--transition), opacity var(--transition), transform var(--transition);
+  white-space: nowrap;
+}
+button:disabled { opacity: .35; cursor: not-allowed; }
+button:not(:disabled):active { transform: scale(.96); }
+
+/* ----- Inputs / Selects ---------------------------------------------- */
+input, select {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: inherit;
+  font-size: .9rem;
+  padding: .3rem .55rem;
+  transition: border-color var(--transition);
+}
+input:focus, select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+input[type="number"] {
+  width: 4.2rem;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
+
+/* =====================================================================
+   HEADER
+   ===================================================================== */
+#app-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  padding: .55rem 1rem;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .6rem;
+}
+
+.header-title {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  flex-shrink: 0;
+}
+.logo { font-size: 1.5rem; }
+
+.header-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .8rem;
+  margin-left: auto;
+}
+
+/* Control groups in header */
+.ctrl-group {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+}
+.ctrl-label {
+  font-size: .75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+}
+
+/* Small +/- style buttons */
+.sm-btn {
+  background: var(--card);
+  color: var(--text);
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--radius);
+  font-size: 1.1rem;
+  line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0;
+}
+.sm-btn:not(:disabled):hover { background: var(--accent); color: #fff; }
+
+/* Play / Stop buttons */
+.play-btn {
+  background: var(--success);
+  color: #fff;
+  padding: .35rem .8rem;
+}
+.play-btn:not(:disabled):hover { background: #27ae60; }
+
+.stop-btn {
+  background: var(--accent3);
+  color: #fff;
+  padding: .35rem .8rem;
+}
+.stop-btn:not(:disabled):hover { background: #c0392b; }
+
+/* Beat indicator dot */
+.beat-indicator {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: background .08s;
+}
+.beat-indicator.playing { background: var(--success); box-shadow: 0 0 6px var(--success); }
+.beat-indicator.flash   { background: #fff; }
+
+/* Action buttons */
+.action-btn {
+  background: var(--card);
+  color: var(--text);
+  padding: .35rem .7rem;
+  border: 1px solid var(--border);
+}
+.action-btn:not(:disabled):hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+.action-btn.danger:not(:disabled):hover { background: var(--danger); border-color: var(--danger); }
+
+.song-actions { gap: .4rem; }
+
+/* =====================================================================
+   SONG TITLE BAR
+   ===================================================================== */
+.song-title-bar {
+  padding: .6rem 1rem .4rem;
+  border-bottom: 1px solid var(--border);
+}
+#song-title {
+  width: 100%;
+  max-width: 500px;
+  font-size: 1.1rem;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid var(--border);
+  border-radius: 0;
+  padding: .2rem .1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+#song-title:focus { border-bottom-color: var(--accent); }
+
+/* =====================================================================
+   SECTIONS CONTAINER
+   ===================================================================== */
+#sections-container {
+  padding: .8rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+}
+
+/* ----- Individual section -------------------------------------------- */
+.section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+/* Colour-code section types */
+.section[data-type="Verse"]    { border-left-color: var(--c-verse);   }
+.section[data-type="Chorus"]   { border-left-color: var(--c-chorus);  }
+.section[data-type="Bridge"]   { border-left-color: var(--c-bridge);  }
+.section[data-type="Middle 8"] { border-left-color: var(--c-middle8); }
+.section[data-type="Change"]   { border-left-color: var(--c-change);  }
+.section[data-type="Outro"]    { border-left-color: var(--c-outro);   }
+.section[data-type="Custom"]   { border-left-color: var(--c-custom);  }
+
+/* ----- Section header ------------------------------------------------ */
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .55rem .85rem;
+  background: rgba(255,255,255,.03);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.section-type-badge {
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  padding: .15rem .5rem;
+  border-radius: 4px;
+  background: var(--card);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.section-name-input {
+  flex: 1;
+  min-width: 8rem;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  font-size: .95rem;
+  font-weight: 600;
+  padding: .1rem .2rem;
+}
+.section-name-input:focus { border-bottom-color: var(--accent); }
+
+.section-header-actions {
+  display: flex;
+  gap: .25rem;
+  margin-left: auto;
+}
+.icon-btn {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid transparent;
+  width: 1.8rem;
+  height: 1.8rem;
+  padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: .85rem;
+}
+.icon-btn:not(:disabled):hover { background: var(--card); color: var(--text); border-color: var(--border); }
+.icon-btn.danger:not(:disabled):hover { color: var(--danger); border-color: var(--danger); }
+
+/* ----- Scale row ----------------------------------------------------- */
+.scale-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .4rem;
+  padding: .45rem .85rem;
+  background: rgba(0,0,0,.12);
+  border-bottom: 1px solid var(--border);
+  font-size: .85rem;
+}
+.scale-row label {
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--text-muted);
+}
+.scale-root-select, .scale-type-select {
+  font-size: .82rem;
+  padding: .2rem .4rem;
+}
+.scale-notes {
+  color: var(--accent2);
+  font-size: .8rem;
+  font-weight: 600;
+  font-family: 'Courier New', monospace;
+  letter-spacing: .03em;
+  word-spacing: .1em;
+}
+
+/* ----- Chords area --------------------------------------------------- */
+.chords-area {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: .7rem;
+  padding: .75rem .85rem;
+}
+
+/* ----- Chord card ---------------------------------------------------- */
+.chord-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: .6rem .65rem .5rem;
+  min-width: 82px;
+  max-width: 90px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .2rem;
+  transition: box-shadow var(--transition), border-color var(--transition);
+  user-select: none;
+}
+.chord-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(123,97,255,.18);
+}
+
+.chord-root {
+  font-size: 1.7rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -.02em;
+  color: var(--text);
+  min-height: 1.9rem;
+  text-align: center;
+}
+
+.chord-qual {
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--accent2);
+  min-height: 1rem;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.chord-divider {
+  width: 70%;
+  height: 1px;
+  background: var(--border);
+  margin: .15rem 0;
+}
+
+/* Control rows (label + ▲ + ▼) */
+.ctrl-row {
+  display: grid;
+  grid-template-columns: auto 1fr 1fr;
+  align-items: center;
+  gap: .2rem;
+  width: 100%;
+}
+.ctrl-row-label {
+  font-size: .6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.arrow-btn {
+  background: var(--surface);
+  color: var(--text-muted);
+  width: 1.7rem;
+  height: 1.7rem;
+  padding: 0;
+  font-size: .8rem;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 5px;
+}
+.arrow-btn:not(:disabled):hover { background: var(--accent); color: #fff; }
+
+/* Card action bar */
+.chord-action-bar {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  gap: .25rem;
+  margin-top: .15rem;
+}
+
+.audition-btn {
+  background: rgba(46, 204, 113, .15);
+  color: var(--success);
+  flex: 1;
+  height: 1.75rem;
+  font-size: .95rem;
+  border-radius: 5px;
+}
+.audition-btn:not(:disabled):hover { background: var(--success); color: #fff; }
+
+.remove-chord-btn {
+  background: rgba(231, 76, 60, .12);
+  color: var(--danger);
+  width: 1.75rem;
+  height: 1.75rem;
+  font-size: .85rem;
+  border-radius: 5px;
+  padding: 0;
+}
+.remove-chord-btn:not(:disabled):hover { background: var(--danger); color: #fff; }
+
+/* Add chord button */
+.add-chord-btn {
+  background: rgba(123,97,255,.12);
+  color: var(--accent);
+  border: 1px dashed var(--accent);
+  padding: .5rem .75rem;
+  align-self: center;
+  font-size: .82rem;
+  height: auto;
+}
+.add-chord-btn:not(:disabled):hover { background: var(--accent); color: #fff; border-style: solid; }
+
+/* =====================================================================
+   ADD SECTION BAR
+   ===================================================================== */
+.add-section-bar {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .6rem 1rem;
+  border-top: 1px solid var(--border);
+}
+#section-type-select { min-width: 120px; }
+.add-btn {
+  background: var(--accent);
+  color: #fff;
+  padding: .4rem 1rem;
+  font-size: .9rem;
+}
+.add-btn:not(:disabled):hover { background: #6450d4; }
+
+/* =====================================================================
+   HELP FOOTER
+   ===================================================================== */
+.help-footer {
+  padding: .8rem 1rem;
+  border-top: 1px solid var(--border);
+  margin-top: .5rem;
+}
+.help-footer summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: .85rem;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+}
+.help-footer summary::-webkit-details-marker { display: none; }
+.help-footer summary::before {
+  content: '▶';
+  font-size: .65rem;
+  transition: transform var(--transition);
+}
+details[open] summary::before { transform: rotate(90deg); }
+
+.help-content {
+  margin-top: .7rem;
+  padding: .75rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: .82rem;
+  color: var(--text-muted);
+}
+.help-content dl { display: grid; grid-template-columns: auto 1fr; gap: .35rem .85rem; }
+.help-content dt { font-weight: 700; color: var(--accent2); white-space: nowrap; }
+.help-content code { background: var(--card); border-radius: 3px; padding: .05em .3em; font-size: .85em; }
+
+/* =====================================================================
+   RESPONSIVE
+   ===================================================================== */
+@media (max-width: 640px) {
+  #app-header { padding: .45rem .65rem; }
+  .header-controls { gap: .5rem; }
+  .song-actions { gap: .25rem; }
+  .action-btn { padding: .3rem .5rem; font-size: .8rem; }
+  #sections-container { padding: .6rem .6rem; gap: .9rem; }
+  .chords-area { gap: .5rem; }
+  .chord-card { min-width: 76px; max-width: 84px; }
+  .chord-root { font-size: 1.45rem; }
+  .help-content dl { grid-template-columns: 1fr; }
+  .help-content dt { margin-top: .4rem; }
+}
+
+@media (max-width: 380px) {
+  .chord-card { min-width: 70px; max-width: 78px; }
+  .chord-root { font-size: 1.3rem; }
+}
