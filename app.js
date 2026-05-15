@@ -334,7 +334,7 @@ function exportJSON() {
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
   a.href     = url;
-  a.download = sanitiseFilename(song.title || 'song') + '.chordz.json';
+  a.download = sanitizeFilename(song.title || 'song') + '.chordz.json';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -365,7 +365,7 @@ function importJSON() {
   input.click();
 }
 
-function sanitiseFilename(str) {
+function sanitizeFilename(str) {
   return str.replace(/[^a-z0-9_\-]/gi, '_').toLowerCase().replace(/__+/g, '_').slice(0, 60) || 'song';
 }
 
@@ -412,9 +412,9 @@ function playKick(time) {
   osc.connect(gain);
   gain.connect(ctx.destination);
   osc.frequency.setValueAtTime(120, time);
-  osc.frequency.exponentialRampToValueAtTime(0.001, time + 0.45);
+  osc.frequency.exponentialRampToValueAtTime(0.01, time + 0.45);
   gain.gain.setValueAtTime(1.2, time);
-  gain.gain.exponentialRampToValueAtTime(0.001, time + 0.45);
+  gain.gain.exponentialRampToValueAtTime(0.01, time + 0.45);
   osc.start(time);
   osc.stop(time + 0.45);
 }
@@ -439,7 +439,7 @@ function playSnare(time) {
   noiseFilter.connect(noiseGain);
   noiseGain.connect(ctx.destination);
   noiseGain.gain.setValueAtTime(0.75, time);
-  noiseGain.gain.exponentialRampToValueAtTime(0.001, time + dur);
+  noiseGain.gain.exponentialRampToValueAtTime(0.01, time + dur);
   noise.start(time);
   noise.stop(time + dur);
 
@@ -452,7 +452,7 @@ function playSnare(time) {
   osc.frequency.setValueAtTime(190, time);
   osc.frequency.exponentialRampToValueAtTime(80, time + 0.08);
   oscGain.gain.setValueAtTime(0.5, time);
-  oscGain.gain.exponentialRampToValueAtTime(0.001, time + 0.08);
+  oscGain.gain.exponentialRampToValueAtTime(0.01, time + 0.08);
   osc.start(time);
   osc.stop(time + 0.08);
 }
@@ -474,7 +474,7 @@ function playHiHat(time) {
   filt.connect(gain);
   gain.connect(ctx.destination);
   gain.gain.setValueAtTime(0.22, time);
-  gain.gain.exponentialRampToValueAtTime(0.001, time + dur);
+  gain.gain.exponentialRampToValueAtTime(0.01, time + dur);
   noise.start(time);
   noise.stop(time + dur);
 }
@@ -536,7 +536,7 @@ function auditionChord(rootSemitone, typeName) {
     gain.gain.setValueAtTime(0, t);
     gain.gain.linearRampToValueAtTime(0.14, t + 0.02);
     gain.gain.setValueAtTime(0.14, t + 0.9);
-    gain.gain.exponentialRampToValueAtTime(0.001, t + 1.4);
+    gain.gain.exponentialRampToValueAtTime(0.01, t + 1.4);
     osc.start(t);
     osc.stop(t + 1.45);
   });
