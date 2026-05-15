@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chordz – Chord &amp; Song Builder</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ===== STICKY HEADER ===== -->
+  <header id="app-header">
+    <div class="header-title">
+      <span class="logo">🎵</span>
+      <h1>Chordz</h1>
+    </div>
+
+    <div class="header-controls">
+
+      <!-- BPM -->
+      <div class="ctrl-group" title="Beats per minute">
+        <span class="ctrl-label">BPM</span>
+        <button class="sm-btn" id="bpm-down" aria-label="BPM down">−</button>
+        <input type="number" id="bpm-input" min="40" max="300" value="100" aria-label="BPM value" />
+        <button class="sm-btn" id="bpm-up" aria-label="BPM up">+</button>
+      </div>
+
+      <!-- Beat playback -->
+      <div class="ctrl-group">
+        <button class="play-btn" id="beat-start" aria-label="Start beat">▶ Beat</button>
+        <button class="stop-btn" id="beat-stop" aria-label="Stop beat" disabled>■ Stop</button>
+        <span class="beat-indicator" id="beat-indicator" aria-hidden="true"></span>
+      </div>
+
+      <!-- Global transpose -->
+      <div class="ctrl-group" title="Transpose whole song by semitone">
+        <span class="ctrl-label">Transpose</span>
+        <button class="sm-btn" id="transpose-down" aria-label="Transpose down">▼</button>
+        <button class="sm-btn" id="transpose-up" aria-label="Transpose up">▲</button>
+      </div>
+
+      <!-- Song actions -->
+      <div class="ctrl-group song-actions">
+        <button class="action-btn" id="save-btn" title="Save to browser storage">💾 Save</button>
+        <button class="action-btn" id="export-btn" title="Export song as JSON file">📤 Export</button>
+        <button class="action-btn" id="import-btn" title="Import song from JSON file">📥 Import</button>
+        <button class="action-btn danger" id="new-btn" title="Start a new song">🆕 New</button>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- ===== SONG TITLE ===== -->
+  <div class="song-title-bar">
+    <input type="text" id="song-title" placeholder="Song title…" aria-label="Song title" />
+  </div>
+
+  <!-- ===== SECTIONS ===== -->
+  <main id="sections-container" aria-label="Song sections"></main>
+
+  <!-- ===== ADD SECTION ===== -->
+  <div class="add-section-bar">
+    <select id="section-type-select" aria-label="Section type to add">
+      <option value="Verse">Verse</option>
+      <option value="Chorus">Chorus</option>
+      <option value="Bridge">Bridge</option>
+      <option value="Middle 8">Middle 8</option>
+      <option value="Change">Change</option>
+      <option value="Outro">Outro</option>
+      <option value="Custom">Custom</option>
+    </select>
+    <button id="add-section-btn" class="add-btn">+ Add Section</button>
+  </div>
+
+  <!-- ===== HELP / LEGEND ===== -->
+  <footer class="help-footer">
+    <details>
+      <summary>ℹ️ How to use Chordz</summary>
+      <div class="help-content">
+        <dl>
+          <dt>🎵 Sections</dt>
+          <dd>Add Verse / Chorus / Bridge / Middle 8 / Change / Outro / Custom sections. Drag sections with ↑↓ to reorder.</dd>
+
+          <dt>🎹 Chord cards — Note ▲▼</dt>
+          <dd>Step the chord's root note up or down by one semitone (C → C# → D …).</dd>
+
+          <dt>🎹 Chord cards — Type ▲▼</dt>
+          <dd>Cycle through chord variations: maj → min → 5 → 6 … and all extended types.</dd>
+
+          <dt>🎹 Chord cards — Xpose ▲▼</dt>
+          <dd>Transpose only this chord up or down by one semitone.</dd>
+
+          <dt>♫ Play chord</dt>
+          <dd>Auditions the chord through your browser using the Web Audio API.</dd>
+
+          <dt>🔑 Section scale</dt>
+          <dd>Each section has its own scale root and scale type. The notes in the chosen scale are shown inline.</dd>
+
+          <dt>🔀 Global Transpose ▲▼</dt>
+          <dd>Shifts every chord root and every section scale root by one semitone across the whole song.</dd>
+
+          <dt>🥁 Beat</dt>
+          <dd>A simple kick/snare/hi-hat pattern plays at the selected BPM. Adjust BPM with + / − or type a value.</dd>
+
+          <dt>💾 Save / Export / Import</dt>
+          <dd>Save stores the song in your browser (localStorage). Export downloads a <code>.json</code> file. Import loads a saved file. 🆕 New clears everything.</dd>
+        </dl>
+      </div>
+    </details>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
