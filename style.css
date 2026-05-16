@@ -632,6 +632,11 @@ input[type='range'] {
   text-transform: none;
   letter-spacing: normal;
 }
+.synth-select-control select {
+  width: 100%;
+  min-width: 0;
+  font-size: 0.82rem;
+}
 
 #sections-container {
   padding: 0.9rem 1rem;
@@ -771,6 +776,7 @@ input[type='range'] {
   display: grid;
   gap: 0.6rem;
   background: rgba(255, 255, 255, 0.015);
+  overflow: hidden;
 }
 .arrangement-title {
   display: flex;
@@ -796,6 +802,7 @@ input[type='range'] {
 }
 .arrangement-track {
   min-width: 0;
+  max-width: 100%;
   display: flex;
   gap: 0.3rem;
   align-items: stretch;
@@ -812,7 +819,7 @@ input[type='range'] {
   padding: 0.2rem 0.1rem;
 }
 .arrangement-block {
-  min-width: 72px;
+  min-width: 112px;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -891,6 +898,20 @@ input[type='range'] {
   letter-spacing: 0.08em;
   color: var(--text-muted);
   min-height: 0.8rem;
+}
+.chord-bass-root {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #ffdca1;
+  min-height: 1rem;
+  text-align: center;
+}
+.chord-bass-offset {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  min-height: 0.7rem;
 }
 .chord-qual {
   font-size: 0.82rem;
@@ -1101,5 +1122,5 @@ details[open] summary::before { transform: rotate(90deg); }
   .arranger-repeat-select,
   .arranger-remove-btn { grid-column: span 1; }
   .chord-card { width: 100%; }
-  .arrangement-block { min-width: 64px; }
+  .arrangement-block { min-width: 96px; }
 }

@@ -128,7 +128,10 @@
           <dd>Add Verse / Chorus / Bridge / Middle 8 / Change / Outro / Custom sections. Drag sections with ↑↓ to reorder.</dd>
 
           <dt>🎹 Chord cards — Note ▲▼</dt>
-          <dd>Step the chord's root note up or down by one semitone (C → C# → D …).</dd>
+          <dd>Step the chord root up/down through the section scale notes (with octave-aware offsets preserved).</dd>
+
+          <dt>🎸 Chord cards — Bass ▲▼</dt>
+          <dd>In <strong>Free</strong> bass mode, adjust each chord segment's bass root independently using scale-aware steps.</dd>
 
           <dt>🎹 Chord cards — Type ▲▼</dt>
           <dd>Cycle through chord variations: maj → min → 5 → 6 … and all extended types.</dd>
@@ -161,7 +164,7 @@
           <dd>Each chord defaults to 4 beats (1 bar). Change Beats on each chord card to control progression length.</dd>
 
           <dt>🎛️ Chord/Bass sounds</dt>
-          <dd>Chord and bass now each have a compact 2-oscillator synth panel with presets, ADSR, filter cutoff, and resonance. Each synth panel can be collapsed/expanded to keep the UI tidy.</dd>
+          <dd>Chord and bass each have compact 2-oscillator synth panels with presets, waveform selectors (Osc 1/Osc 2), ADSR, filter, harmonic drive (distortion), and simple modulation (rate/depth). The bass panel also includes a <strong>Pitch mode</strong> switch: <strong>Linked</strong> (bass follows chord) or <strong>Free</strong> (independent bass pitch).</dd>
 
           <dt>🎚️ Mixer + Reverb</dt>
           <dd>Use Mixer to balance chord/bass/<strong>drum</strong>/output levels. The <strong>Drums</strong> slider controls the volume of all drum sequencer lanes as well as crash and roll sounds. Each synth has its own Reverb wet/dry slider, so chord and bass ambience can be shaped independently.</dd>
@@ -170,7 +173,7 @@
           <dd>Each chord card has Chord x and Bass x selectors (1/2/4). Repeats split the same segment into repeated hits over that segment length.</dd>
 
           <dt>🧱 DAW lanes</dt>
-          <dd>Each section shows chord and bass arrangement lanes. Drag blocks to reorder the progression; the chord cards update to match. The currently playing block is highlighted during playback.</dd>
+          <dd>Each section shows chord and bass arrangement lanes. Drag blocks to reorder the progression; the chord cards update to match. Lanes keep readable minimum block widths and scroll horizontally inside the lane when needed. The currently playing block is highlighted during playback.</dd>
 
           <dt>🧭 Arranger</dt>
           <dd>Add section entries, set repeat counts, and drag to reorder. The arranger is placed below synth controls. Song mode follows arranger rows/repeats when present; otherwise it uses section order.</dd>
