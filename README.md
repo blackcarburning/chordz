@@ -17,14 +17,25 @@ A browser-based, dependency-free web app for building chord progressions and son
 * **2-oscillator chord + bass synths** – Separate chord and bass synth panels with presets, ADSR, filter cutoff, resonance, oscillator mix/detune defaults, and bass enable/disable.
 * **Collapsible synth controls** – Chord and bass synth panels can be collapsed/expanded to keep the interface tidy without losing settings.
 * **Per-instrument reverb wet/dry** – Chord and bass synth cards each include a dedicated reverb wet control so ambience can be shaped independently.
-* **Mixer section** – Dedicated mixer controls for chord level, bass level, and overall output level.
-* **UI order update** – Synth controls appear above the arranger; the arranger panel sits below them for cleaner workflow.
+* **Mixer section** – Dedicated mixer controls for chord level, bass level, **drum level**, and overall output level. The Drums slider affects all drum sequencer sounds including crash and roll.
+
+### 🥁 8-Lane Drum Sequencer
+
+Replaces the old preset beat with a fully editable pattern-based drum sequencer:
+
+* **8 drum lanes**: Kick, Snare, Closed Hat, Open Hat, Hi Tom, Mid Tom, Low Tom, Ride. Each produces a distinct Web Audio–generated sound.
+* **16th-note grid** (16 steps = 1 bar). Steps loop automatically for section lengths longer than one bar.
+* **Click any step button** to toggle it on or off. Beat-group boundaries (every 4 steps) are visually marked.
+* **10 nameable pattern slots** – The song stores 10 independent patterns. Switch between them with the **Edit pattern** dropdown in the sequencer panel, then rename using the **Pattern name** field. The first three patterns come with starter grooves (Rock Beat, Funk, Ballad); the remaining seven are blank.
+* **Per-section drum pattern assignment** – Each song section has a **Drum pattern** dropdown in its options row. This chooses which of the 10 patterns plays when that section is active.
+* **Arranger integration** – Song-mode playback through the arranger uses the pattern assigned to the currently playing section; repeated sections use the same pattern each time.
+
+* **UI order** – The drum sequencer panel appears above the synth controls for quick access during composition.
 * **DAW-style arrangement lanes** – Each section shows chord and bass lanes with beat-proportional blocks. Drag blocks to reorder the progression and the chord cards update to match.
 * **Draggable arranger** – Add section entries, set repeat counts per entry, and drag to reorder song playback order. Song mode follows arranger entries/repeats when present, and falls back to section order when arranger is empty.
 * **Section transitions** – Optional per-section crash cymbal at section start and roll at section end.
-* **Beat** – A kick/snare/hi-hat beat plays via the Web Audio API at the selected BPM. Adjust BPM with the +/− buttons or type directly.
 * **Song naming + recents** – A song title box is always visible, and an **Open most recent** dropdown lists recent songs with last-updated timestamps.
-* **Persistence** – Songs are saved automatically to browser storage and the most recently edited/opened song is restored on load. Export/import includes song metadata (title/id/timestamp), sections/chords, chord lengths, chord+bass repeats, synth settings, per-instrument reverb, mixer levels, DAW ordering, crash/roll options, arranger order/repeats, playback mode, and sound selections.
+* **Persistence** – Songs are saved automatically to browser storage and the most recently edited/opened song is restored on load. Drum patterns (grids, names, and per-section assignments) are fully persisted in browser storage. Export/import includes song metadata, sections/chords, drum patterns, per-section drum pattern assignments, drummer volume, chord lengths, chord+bass repeats, synth settings, per-instrument reverb, mixer levels, DAW ordering, crash/roll options, arranger order/repeats, playback mode, and sound selections. Older JSON files without drum patterns load successfully — default patterns are added automatically.
 
 ## Running locally
 

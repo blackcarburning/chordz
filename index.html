@@ -92,6 +92,9 @@
   <!-- ===== MIXER ===== -->
   <section id="mixer-panel" class="mixer-panel" aria-label="Mixer controls"></section>
 
+  <!-- ===== DRUM SEQUENCER ===== -->
+  <section id="drum-sequencer-panel" class="drum-sequencer-panel" aria-label="Drum sequencer"></section>
+
   <!-- ===== SYNTH CONTROLS ===== -->
   <section id="synth-rack" class="synth-rack" aria-label="Chord and bass synth controls"></section>
 
@@ -143,7 +146,13 @@
           <dd>Shifts every chord root and every section scale root by one semitone across the whole song.</dd>
 
           <dt>🥁 Beat</dt>
-          <dd>A simple kick/snare/hi-hat pattern plays at the selected BPM. In Edit mode, the selected section radio loops. In Song mode, the full arrangement plays through once.</dd>
+          <dd>An 8-lane 16th-note drum sequencer replaces the old preset pattern. Lanes: Kick, Snare, Cl. Hat, Op. Hat, Hi Tom, Mid Tom, Low Tom, Ride. Click any step button to toggle it on/off.</dd>
+
+          <dt>🎛️ Drum Patterns (10 slots)</dt>
+          <dd>10 nameable drum patterns are stored per song. Use the <strong>Edit pattern</strong> dropdown in the sequencer to switch which pattern you are editing. Rename it with the <strong>Pattern name</strong> field. Patterns are saved in the browser and included in JSON export/import.</dd>
+
+          <dt>📌 Per-section drum pattern</dt>
+          <dd>Each section has a <strong>Drum pattern</strong> dropdown in its options row. Choose which of the 10 patterns plays for that section. The arranger uses the section's assigned pattern when playing in Song mode.</dd>
 
           <dt>📍 Go to / position</dt>
           <dd>In Song mode, use the Go to slider to jump to a song location. The position display shows current section, chord, and beat.</dd>
@@ -155,7 +164,7 @@
           <dd>Chord and bass now each have a compact 2-oscillator synth panel with presets, ADSR, filter cutoff, and resonance. Each synth panel can be collapsed/expanded to keep the UI tidy.</dd>
 
           <dt>🎚️ Mixer + Reverb</dt>
-          <dd>Use Mixer to balance chord/bass/output levels. Each synth has its own Reverb wet/dry slider, so chord and bass ambience can be shaped independently.</dd>
+          <dd>Use Mixer to balance chord/bass/<strong>drum</strong>/output levels. The <strong>Drums</strong> slider controls the volume of all drum sequencer lanes as well as crash and roll sounds. Each synth has its own Reverb wet/dry slider, so chord and bass ambience can be shaped independently.</dd>
 
           <dt>🔁 Note repeats</dt>
           <dd>Each chord card has Chord x and Bass x selectors (1/2/4). Repeats split the same segment into repeated hits over that segment length.</dd>
@@ -173,7 +182,7 @@
           <dd>Each section has checkboxes for a crash cymbal at section start and a simple roll at section end.</dd>
 
           <dt>💾 Save / Export / Import</dt>
-          <dd>Save stores songs in your browser and remembers the last opened song. Use Open most recent to load recent songs. Export/import includes song metadata, sections, beats, repeats, synths, reverb, mixer, arranger, and playback settings. 🆕 New clears everything.</dd>
+          <dd>Save stores songs in your browser and remembers the last opened song. Use Open most recent to load recent songs. Export/import includes song metadata, sections, beats, repeats, synths, reverb, mixer, arranger, drum patterns, per-section drum pattern assignments, and playback settings. Older JSON files load successfully with default drum patterns added automatically. 🆕 New clears everything.</dd>
         </dl>
       </div>
     </details>

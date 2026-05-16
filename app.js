@@ -59,6 +59,56 @@ const PLAYBACK_MODES = ['edit', 'song'];
 const NOTE_REPEAT_OPTIONS = [1, 2, 4];
 const RECENT_SONG_LIMIT = 8;
 
+const DRUM_PATTERN_COUNT = 10;
+const DRUM_LANES = [
+  { key: 'kick',      label: 'Kick' },
+  { key: 'snare',     label: 'Snare' },
+  { key: 'closedHat', label: 'Cl. Hat' },
+  { key: 'openHat',   label: 'Op. Hat' },
+  { key: 'hiTom',     label: 'Hi Tom' },
+  { key: 'midTom',    label: 'Mid Tom' },
+  { key: 'lowTom',    label: 'Low Tom' },
+  { key: 'ride',      label: 'Ride' },
+];
+
+// Pre-defined grid patterns for the first 3 slots
+const DRUM_PRESET_GRIDS = [
+  { // Rock Beat
+    kick:      [1,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,0,0],
+    snare:     [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
+    closedHat: [1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0],
+    openHat:   [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,1],
+    hiTom:     [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+    midTom:    [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+    lowTom:    [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+    ride:      [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+  },
+  { // Funk
+    kick:      [1,0,0,1, 0,0,1,0, 1,0,0,0, 0,0,1,0],
+    snare:     [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
+    closedHat: [1,1,1,1, 1,1,1,1, 1,1,1,1, 1,1,1,1],
+    openHat:   [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+    hiTom:     [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+    midTom:    [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+    lowTom:    [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+    ride:      [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+  },
+  { // Ballad
+    kick:      [1,0,0,0, 0,0,0,0, 1,0,0,0, 0,0,0,0],
+    snare:     [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],
+    closedHat: [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0],
+    openHat:   [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+    hiTom:     [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+    midTom:    [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+    lowTom:    [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+    ride:      [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+  },
+];
+const DRUM_PRESET_NAMES = [
+  'Rock Beat', 'Funk', 'Ballad',
+  'Pattern 4', 'Pattern 5', 'Pattern 6', 'Pattern 7', 'Pattern 8', 'Pattern 9', 'Pattern 10',
+];
+
 const SYNTH_PRESET_LIBRARY = {
   chord: {
     warmPad: {
@@ -323,13 +373,17 @@ function createSection(type) {
     scaleType: 'Major',
     crashOnStart: false,
     rollAtEnd: false,
+    drumPatternId: null,
     chords: defaults.map(chord => ({ id: makeId(), root: chord.root, type: chord.type, beats: 4, chordRepeat: 1, bassRepeat: 1 })),
   };
 }
 
 function createDefaultSong() {
   const now = Date.now();
+  const drumPatterns = Array.from({ length: DRUM_PATTERN_COUNT }, (_, i) => createDefaultDrumPattern(i));
+  const defaultPatternId = drumPatterns[0].id;
   const sections = [createSection('Verse'), createSection('Chorus'), createSection('Bridge')];
+  sections.forEach(s => { s.drumPatternId = defaultPatternId; });
   return {
     id: makeId(),
     title: 'Untitled Song',
@@ -342,9 +396,11 @@ function createDefaultSong() {
     bassEnabled: true,
     bassSound: 'roundBass',
     bassSynth: createSynthSettings('bass', 'roundBass'),
+    drumPatterns,
     mixer: {
       chordVolume: 0.9,
       bassVolume: 0.9,
+      drumsVolume: 0.9,
       masterVolume: 0.95,
     },
     reverb: {
@@ -361,6 +417,49 @@ function normalizeRepeat(value, fallback = 1) {
   return NOTE_REPEAT_OPTIONS.includes(repeat) ? repeat : fallback;
 }
 
+function emptyDrumGrid() {
+  const grid = {};
+  DRUM_LANES.forEach(lane => { grid[lane.key] = Array(16).fill(0); });
+  return grid;
+}
+
+function createDefaultDrumPattern(index) {
+  const presetGrid = DRUM_PRESET_GRIDS[index];
+  const grid = {};
+  DRUM_LANES.forEach(lane => {
+    grid[lane.key] = presetGrid ? presetGrid[lane.key].slice() : Array(16).fill(0);
+  });
+  return {
+    id: makeId(),
+    name: DRUM_PRESET_NAMES[index] || `Pattern ${index + 1}`,
+    grid,
+  };
+}
+
+function normalizeDrumPatterns(rawPatterns) {
+  const result = [];
+  for (let i = 0; i < DRUM_PATTERN_COUNT; i++) {
+    const raw = Array.isArray(rawPatterns) ? rawPatterns[i] : null;
+    if (raw && typeof raw === 'object') {
+      const grid = {};
+      DRUM_LANES.forEach(lane => {
+        const rawRow = raw.grid?.[lane.key];
+        grid[lane.key] = (Array.isArray(rawRow) && rawRow.length >= 16)
+          ? rawRow.slice(0, 16).map(v => (v ? 1 : 0))
+          : Array(16).fill(0);
+      });
+      result.push({
+        id: typeof raw.id === 'string' && raw.id.trim() ? raw.id : makeId(),
+        name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : `Pattern ${i + 1}`,
+        grid,
+      });
+    } else {
+      result.push(createDefaultDrumPattern(i));
+    }
+  }
+  return result;
+}
+
 // =====================================================================
 // STATE – Song data model
 // =====================================================================
@@ -368,6 +467,7 @@ function normalizeRepeat(value, fallback = 1) {
 let song = createDefaultSong();
 let songVersion = 0;
 const synthPanelExpanded = { chord: true, bass: true };
+let editingDrumPatternId = null;
 
 function normalizeChord(rawChord) {
   const chord = rawChord || {};
@@ -392,6 +492,7 @@ function normalizeSection(rawSection, fallbackType = 'Custom') {
     scaleType: SCALES.some(scale => scale.name === section.scaleType) ? section.scaleType : 'Major',
     crashOnStart: Boolean(section.crashOnStart),
     rollAtEnd: Boolean(section.rollAtEnd),
+    drumPatternId: section.drumPatternId || null,
     chords: (Array.isArray(section.chords) ? section.chords : []).map(normalizeChord),
   };
 }
@@ -399,8 +500,24 @@ function normalizeSection(rawSection, fallbackType = 'Custom') {
 function normalizeSong(rawSong) {
   const base = createDefaultSong();
   const parsed = rawSong || {};
-  const sections = (Array.isArray(parsed.sections) ? parsed.sections : base.sections).map(section => normalizeSection(section, section?.type));
-  if (sections.length === 0) sections.push(createSection('Verse'));
+
+  const drumPatterns = normalizeDrumPatterns(parsed.drumPatterns);
+  const validPatternIds = new Set(drumPatterns.map(p => p.id));
+  const defaultPatternId = drumPatterns[0].id;
+
+  const sections = (Array.isArray(parsed.sections) ? parsed.sections : base.sections)
+    .map(section => {
+      const normalized = normalizeSection(section, section?.type);
+      return {
+        ...normalized,
+        drumPatternId: validPatternIds.has(normalized.drumPatternId) ? normalized.drumPatternId : defaultPatternId,
+      };
+    });
+  if (sections.length === 0) {
+    const defaultSection = createSection('Verse');
+    defaultSection.drumPatternId = defaultPatternId;
+    sections.push(defaultSection);
+  }
   const selectedSectionExists = sections.some(section => section.id === parsed.selectedSectionId);
   const chordSound = resolvePresetId('chord', parsed.chordSound || parsed.chordSynth?.preset || base.chordSound);
   const bassSound = resolvePresetId('bass', parsed.bassSound || parsed.bassSynth?.preset || base.bassSound);
@@ -427,9 +544,11 @@ function normalizeSong(rawSong) {
     bassEnabled: parsed.bassEnabled === undefined ? base.bassEnabled : Boolean(parsed.bassEnabled),
     bassSound,
     bassSynth: normalizeSynthSettings('bass', parsed.bassSynth, bassSound),
+    drumPatterns,
     mixer: {
       chordVolume: clampNumber(parsed.mixer?.chordVolume, base.mixer.chordVolume, 0, 1),
       bassVolume: clampNumber(parsed.mixer?.bassVolume, base.mixer.bassVolume, 0, 1),
+      drumsVolume: clampNumber(parsed.mixer?.drumsVolume, base.mixer.drumsVolume, 0, 1),
       masterVolume: clampNumber(parsed.mixer?.masterVolume, base.mixer.masterVolume, 0, 1),
     },
     reverb: {
@@ -503,6 +622,7 @@ function commitSong({ rerender = false, refreshCursor = false } = {}) {
 
 function addSection(type) {
   const section = createSection(type);
+  section.drumPatternId = song.drumPatterns?.[0]?.id || null;
   song.sections.push(section);
   if (!song.selectedSectionId) song.selectedSectionId = section.id;
   commitSong({ rerender: true, refreshCursor: true });
@@ -785,6 +905,42 @@ function moveArrangerEntry(draggedEntryId, targetEntryId, placeAfter = false) {
 }
 
 // =====================================================================
+// DRUM PATTERN MUTATIONS
+// =====================================================================
+
+function updateDrumStep(patternId, laneKey, step) {
+  const pattern = song.drumPatterns?.find(p => p.id === patternId);
+  if (!pattern) return;
+  pattern.grid[laneKey][step] = pattern.grid[laneKey][step] ? 0 : 1;
+  commitSong();
+}
+
+function updateDrumPatternName(patternId, name) {
+  const pattern = song.drumPatterns?.find(p => p.id === patternId);
+  if (!pattern) return;
+  pattern.name = name;
+  commitSong();
+  // Update all <option> elements referencing this pattern's id
+  document.querySelectorAll(`option[value="${patternId}"]`).forEach(opt => {
+    opt.textContent = name;
+  });
+}
+
+function selectEditDrumPattern(patternId) {
+  if (!song.drumPatterns?.some(p => p.id === patternId)) return;
+  editingDrumPatternId = patternId;
+  renderDrumSequencer();
+}
+
+function updateSectionDrumPattern(sectionId, patternId) {
+  const section = song.sections.find(s => s.id === sectionId);
+  if (!section) return;
+  if (!song.drumPatterns?.some(p => p.id === patternId)) return;
+  section.drumPatternId = patternId;
+  commitSong();
+}
+
+// =====================================================================
 // PERSISTENCE – localStorage + JSON export/import
 // =====================================================================
 
@@ -1013,12 +1169,6 @@ const STEPS = 16;
 const LOOKAHEAD_MS = 25;
 const SCHEDULE_AHEAD = 0.1;
 
-const BEAT_PATTERN = {
-  kick:  [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
-  snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
-  hihat: [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
-};
-
 function getAudioCtx() {
   if (!audioCtx) {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -1064,10 +1214,14 @@ function setupAudioRouting() {
     return { input, dry, wet, output, convolver };
   };
 
+  const drumsGain = ctx.createGain();
+  drumsGain.connect(master);
+
   audioRouting = {
     master,
     chord: makeInstrumentBus(),
     bass: makeInstrumentBus(),
+    drums: { input: drumsGain, output: drumsGain },
   };
   applyAudioMixSettings();
 }
@@ -1090,6 +1244,9 @@ function applyAudioMixSettings() {
 
   setBus('chord', mixer.chordVolume, reverb.chordWet);
   setBus('bass', mixer.bassVolume, reverb.bassWet);
+  if (audioRouting.drums) {
+    audioRouting.drums.output.gain.value = clampNumber(mixer.drumsVolume, 0.9, 0, 1);
+  }
 }
 
 function createNoiseBuffer(duration) {
@@ -1103,10 +1260,11 @@ function createNoiseBuffer(duration) {
 
 function playKick(time) {
   const ctx = getAudioCtx();
+  const dest = audioRouting?.drums?.input || ctx.destination;
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
   osc.connect(gain);
-  gain.connect(ctx.destination);
+  gain.connect(dest);
   osc.frequency.setValueAtTime(120, time);
   osc.frequency.exponentialRampToValueAtTime(40, time + 0.12);
   gain.gain.setValueAtTime(0.0001, time);
@@ -1118,6 +1276,7 @@ function playKick(time) {
 
 function playSnare(time) {
   const ctx = getAudioCtx();
+  const dest = audioRouting?.drums?.input || ctx.destination;
   const noise = ctx.createBufferSource();
   noise.buffer = createNoiseBuffer(0.16);
   const noiseFilter = ctx.createBiquadFilter();
@@ -1126,7 +1285,7 @@ function playSnare(time) {
   const noiseGain = ctx.createGain();
   noise.connect(noiseFilter);
   noiseFilter.connect(noiseGain);
-  noiseGain.connect(ctx.destination);
+  noiseGain.connect(dest);
   noiseGain.gain.setValueAtTime(0.0001, time);
   noiseGain.gain.linearRampToValueAtTime(0.65, time + 0.002);
   noiseGain.gain.exponentialRampToValueAtTime(0.0001, time + 0.14);
@@ -1137,7 +1296,7 @@ function playSnare(time) {
   const oscGain = ctx.createGain();
   osc.type = 'triangle';
   osc.connect(oscGain);
-  oscGain.connect(ctx.destination);
+  oscGain.connect(dest);
   osc.frequency.setValueAtTime(220, time);
   osc.frequency.exponentialRampToValueAtTime(110, time + 0.08);
   oscGain.gain.setValueAtTime(0.0001, time);
@@ -1147,8 +1306,9 @@ function playSnare(time) {
   osc.stop(time + 0.09);
 }
 
-function playHiHat(time) {
+function playClosedHat(time) {
   const ctx = getAudioCtx();
+  const dest = audioRouting?.drums?.input || ctx.destination;
   const noise = ctx.createBufferSource();
   noise.buffer = createNoiseBuffer(0.05);
   const filter = ctx.createBiquadFilter();
@@ -1157,7 +1317,7 @@ function playHiHat(time) {
   const gain = ctx.createGain();
   noise.connect(filter);
   filter.connect(gain);
-  gain.connect(ctx.destination);
+  gain.connect(dest);
   gain.gain.setValueAtTime(0.0001, time);
   gain.gain.linearRampToValueAtTime(0.2, time + 0.001);
   gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.045);
@@ -1165,14 +1325,123 @@ function playHiHat(time) {
   noise.stop(time + 0.05);
 }
 
+function playHiHat(time) { playClosedHat(time); }
+
+function playOpenHat(time) {
+  const ctx = getAudioCtx();
+  const dest = audioRouting?.drums?.input || ctx.destination;
+  const noise = ctx.createBufferSource();
+  noise.buffer = createNoiseBuffer(0.45);
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'highpass';
+  filter.frequency.value = 5000;
+  const gain = ctx.createGain();
+  noise.connect(filter);
+  filter.connect(gain);
+  gain.connect(dest);
+  gain.gain.setValueAtTime(0.0001, time);
+  gain.gain.linearRampToValueAtTime(0.28, time + 0.002);
+  gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.4);
+  noise.start(time);
+  noise.stop(time + 0.45);
+}
+
+function playHighTom(time) {
+  const ctx = getAudioCtx();
+  const dest = audioRouting?.drums?.input || ctx.destination;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain);
+  gain.connect(dest);
+  osc.frequency.setValueAtTime(260, time);
+  osc.frequency.exponentialRampToValueAtTime(150, time + 0.15);
+  gain.gain.setValueAtTime(0.0001, time);
+  gain.gain.linearRampToValueAtTime(0.75, time + 0.003);
+  gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.22);
+  osc.start(time);
+  osc.stop(time + 0.25);
+}
+
+function playMidTom(time) {
+  const ctx = getAudioCtx();
+  const dest = audioRouting?.drums?.input || ctx.destination;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain);
+  gain.connect(dest);
+  osc.frequency.setValueAtTime(190, time);
+  osc.frequency.exponentialRampToValueAtTime(100, time + 0.18);
+  gain.gain.setValueAtTime(0.0001, time);
+  gain.gain.linearRampToValueAtTime(0.75, time + 0.003);
+  gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.28);
+  osc.start(time);
+  osc.stop(time + 0.32);
+}
+
+function playLowTom(time) {
+  const ctx = getAudioCtx();
+  const dest = audioRouting?.drums?.input || ctx.destination;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain);
+  gain.connect(dest);
+  osc.frequency.setValueAtTime(130, time);
+  osc.frequency.exponentialRampToValueAtTime(65, time + 0.22);
+  gain.gain.setValueAtTime(0.0001, time);
+  gain.gain.linearRampToValueAtTime(0.8, time + 0.004);
+  gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.34);
+  osc.start(time);
+  osc.stop(time + 0.38);
+}
+
+function playRide(time) {
+  const ctx = getAudioCtx();
+  const dest = audioRouting?.drums?.input || ctx.destination;
+  const masterGain = ctx.createGain();
+  masterGain.connect(dest);
+  masterGain.gain.setValueAtTime(0.0001, time);
+  masterGain.gain.linearRampToValueAtTime(0.18, time + 0.002);
+  masterGain.gain.exponentialRampToValueAtTime(0.0001, time + 0.28);
+  [560, 845, 1174, 1523, 1780].forEach(freq => {
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    g.gain.value = 0.04;
+    osc.type = 'square';
+    osc.frequency.value = freq;
+    osc.connect(g);
+    g.connect(masterGain);
+    osc.start(time);
+    osc.stop(time + 0.3);
+  });
+}
+
+function playDrumLane(key, time) {
+  switch (key) {
+    case 'kick':      playKick(time); break;
+    case 'snare':     playSnare(time); break;
+    case 'closedHat': playClosedHat(time); break;
+    case 'openHat':   playOpenHat(time); break;
+    case 'hiTom':     playHighTom(time); break;
+    case 'midTom':    playMidTom(time); break;
+    case 'lowTom':    playLowTom(time); break;
+    case 'ride':      playRide(time); break;
+  }
+}
+
 function scheduleStep(step, time) {
-  if (BEAT_PATTERN.kick[step]) playKick(time);
-  if (BEAT_PATTERN.snare[step]) playSnare(time);
-  if (BEAT_PATTERN.hihat[step]) playHiHat(time);
+  const section = song.sections[playbackCursor.sectionIndex];
+  const patternId = section?.drumPatternId;
+  const patterns = song.drumPatterns || [];
+  const pattern = patterns.find(p => p.id === patternId) || patterns[0];
+  if (!pattern) return;
+  DRUM_LANES.forEach(lane => {
+    if (pattern.grid[lane.key]?.[step]) playDrumLane(lane.key, time);
+  });
 }
 
 function playCrash(time) {
   const ctx = getAudioCtx();
+  const dest = audioRouting?.drums?.input || ctx.destination;
   const source = ctx.createBufferSource();
   source.buffer = createNoiseBuffer(0.8);
   const highpass = ctx.createBiquadFilter();
@@ -1186,7 +1455,7 @@ function playCrash(time) {
   source.connect(highpass);
   highpass.connect(bandpass);
   bandpass.connect(gain);
-  gain.connect(ctx.destination);
+  gain.connect(dest);
   gain.gain.setValueAtTime(0.0001, time);
   gain.gain.linearRampToValueAtTime(0.45, time + 0.003);
   gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.8);
@@ -1573,7 +1842,128 @@ function auditionChord(rootSemitone, typeName) {
 // RENDER
 // =====================================================================
 
-function render() {
+function renderDrumSequencer() {
+  const panel = document.getElementById('drum-sequencer-panel');
+  if (!panel) return;
+  panel.innerHTML = '';
+
+  const patterns = song.drumPatterns || [];
+  if (!patterns.length) return;
+
+  // Ensure editingDrumPatternId is valid
+  if (!editingDrumPatternId || !patterns.some(p => p.id === editingDrumPatternId)) {
+    editingDrumPatternId = patterns[0].id;
+  }
+  const pattern = patterns.find(p => p.id === editingDrumPatternId);
+
+  // Header
+  const header = document.createElement('div');
+  header.className = 'drum-seq-header';
+  const title = document.createElement('h2');
+  title.textContent = '🥁 Drum Sequencer';
+  const helpText = document.createElement('p');
+  helpText.className = 'drum-seq-help';
+  helpText.textContent = '8-lane 16th-note grid • Click steps to toggle on/off • Each section can use a different pattern (set in the section options row below)';
+  header.append(title, helpText);
+
+  // Controls row: pattern selector + name input
+  const controlsRow = document.createElement('div');
+  controlsRow.className = 'drum-seq-controls-row';
+
+  const patternLabel = document.createElement('label');
+  patternLabel.className = 'drum-seq-label-wrap';
+  const patternText = document.createElement('span');
+  patternText.textContent = 'Edit pattern';
+  const patternSelect = document.createElement('select');
+  patternSelect.id = 'drum-pattern-select';
+  patternSelect.setAttribute('aria-label', 'Select drum pattern to edit');
+  patterns.forEach(p => {
+    const option = document.createElement('option');
+    option.value = p.id;
+    option.textContent = p.name;
+    if (p.id === editingDrumPatternId) option.selected = true;
+    patternSelect.appendChild(option);
+  });
+  patternSelect.addEventListener('change', () => selectEditDrumPattern(patternSelect.value));
+  patternLabel.append(patternText, patternSelect);
+
+  const nameLabel = document.createElement('label');
+  nameLabel.className = 'drum-seq-label-wrap';
+  const nameText = document.createElement('span');
+  nameText.textContent = 'Pattern name';
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.className = 'drum-seq-name-input';
+  nameInput.value = pattern.name;
+  nameInput.placeholder = 'Pattern name…';
+  nameInput.setAttribute('aria-label', 'Drum pattern name');
+  nameInput.addEventListener('input', () => updateDrumPatternName(editingDrumPatternId, nameInput.value));
+  nameLabel.append(nameText, nameInput);
+
+  controlsRow.append(patternLabel, nameLabel);
+
+  // Grid container
+  const grid = document.createElement('div');
+  grid.className = 'drum-seq-grid';
+
+  // Step numbers header row
+  const numbersRow = document.createElement('div');
+  numbersRow.className = 'drum-seq-lane';
+  const spacer = document.createElement('span');
+  spacer.className = 'drum-seq-lane-label';
+  numbersRow.appendChild(spacer);
+  const stepsWrap = document.createElement('div');
+  stepsWrap.className = 'drum-seq-steps';
+  for (let s = 0; s < 16; s++) {
+    const num = document.createElement('span');
+    num.className = 'drum-seq-step-num' + (s % 4 === 0 ? ' beat-start' : '');
+    num.textContent = String(s + 1);
+    stepsWrap.appendChild(num);
+  }
+  numbersRow.appendChild(stepsWrap);
+  grid.appendChild(numbersRow);
+
+  // Lane rows
+  DRUM_LANES.forEach(lane => {
+    const row = document.createElement('div');
+    row.className = 'drum-seq-lane';
+
+    const laneLabel = document.createElement('span');
+    laneLabel.className = 'drum-seq-lane-label';
+    laneLabel.textContent = lane.label;
+
+    const steps = document.createElement('div');
+    steps.className = 'drum-seq-steps';
+
+    for (let s = 0; s < 16; s++) {
+      const active = Boolean(pattern.grid[lane.key]?.[s]);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'drum-seq-btn' +
+        (s % 4 === 0 ? ' beat-start' : '') +
+        (active ? ' active' : '');
+      btn.setAttribute('aria-label', `${lane.label} step ${s + 1}`);
+      btn.setAttribute('aria-pressed', String(active));
+      btn.title = `${lane.label} • step ${s + 1}`;
+      // Capture s and lane for the closure
+      const step = s;
+      const laneKey = lane.key;
+      btn.addEventListener('click', () => {
+        updateDrumStep(editingDrumPatternId, laneKey, step);
+        btn.classList.toggle('active');
+        btn.setAttribute('aria-pressed', String(btn.classList.contains('active')));
+      });
+      steps.appendChild(btn);
+    }
+
+    row.append(laneLabel, steps);
+    grid.appendChild(row);
+  });
+
+  panel.append(header, controlsRow, grid);
+}
+
+function renderMixerPanel() {
   song = normalizeSong(song);
 
   const titleElement = document.getElementById('song-title');
@@ -1587,6 +1977,7 @@ function render() {
 
   renderRecentSongsDropdown();
   renderMixerPanel();
+  renderDrumSequencer();
   renderSynthRack();
   renderArrangerPanel();
 
@@ -1609,13 +2000,14 @@ function renderMixerPanel() {
   title.textContent = 'Mixer';
   const help = document.createElement('p');
   help.className = 'mixer-help';
-  help.textContent = 'Balance chord and bass levels. Reverb wet/dry is per instrument in each synth card.';
+  help.textContent = 'Balance chord, bass, and drum levels. Reverb wet/dry is per instrument in each synth card.';
 
   const controls = document.createElement('div');
   controls.className = 'mixer-controls';
   controls.append(
     buildMixerSlider('Chords', song.mixer.chordVolume, value => updateMixerField('chordVolume', value)),
     buildMixerSlider('Bass', song.mixer.bassVolume, value => updateMixerField('bassVolume', value)),
+    buildMixerSlider('Drums', song.mixer.drumsVolume, value => updateMixerField('drumsVolume', value)),
     buildMixerSlider('Output', song.mixer.masterVolume, value => updateMixerField('masterVolume', value)),
   );
 
@@ -2115,11 +2507,29 @@ function buildSectionOptionsRow(section) {
   rollCheckbox.addEventListener('change', () => updateSectionOptions(section.id, { rollAtEnd: rollCheckbox.checked }));
   rollLabel.append(rollCheckbox, document.createTextNode('Roll at end'));
 
+  // Drum pattern selector
+  const drumPatternWrap = document.createElement('label');
+  drumPatternWrap.className = 'section-drum-pattern-field';
+  const drumPatternText = document.createElement('span');
+  drumPatternText.textContent = 'Drum pattern';
+  const drumPatternSelect = document.createElement('select');
+  drumPatternSelect.className = 'section-drum-pattern-select';
+  drumPatternSelect.setAttribute('aria-label', 'Drum pattern for this section');
+  (song.drumPatterns || []).forEach(p => {
+    const option = document.createElement('option');
+    option.value = p.id;
+    option.textContent = p.name;
+    if (p.id === section.drumPatternId) option.selected = true;
+    drumPatternSelect.appendChild(option);
+  });
+  drumPatternSelect.addEventListener('change', () => updateSectionDrumPattern(section.id, drumPatternSelect.value));
+  drumPatternWrap.append(drumPatternText, drumPatternSelect);
+
   const beatsSummary = document.createElement('span');
   beatsSummary.className = 'section-beat-summary';
   beatsSummary.textContent = `${getSectionBeatLength(section)} beats total`;
 
-  row.append(crashLabel, rollLabel, beatsSummary);
+  row.append(crashLabel, rollLabel, drumPatternWrap, beatsSummary);
   return row;
 }
 
