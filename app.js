@@ -56,6 +56,7 @@ const SCALES = [
 
 const SECTION_TYPES = ['Verse', 'Chorus', 'Bridge', 'Middle 8', 'Change', 'Outro', 'Custom'];
 const PLAYBACK_MODES = ['edit', 'song'];
+const NOTE_REPEAT_OPTIONS = [1, 2, 4];
 
 const SYNTH_PRESET_LIBRARY = {
   chord: {
@@ -321,7 +322,7 @@ function createSection(type) {
     scaleType: 'Major',
     crashOnStart: false,
     rollAtEnd: false,
-    chords: defaults.map(chord => ({ id: makeId(), root: chord.root, type: chord.type, beats: 4 })),
+    chords: defaults.map(chord => ({ id: makeId(), root: chord.root, type: chord.type, beats: 4, chordRepeat: 1, bassRepeat: 1 })),
   };
 }
 
@@ -337,8 +338,23 @@ function createDefaultSong() {
     bassEnabled: true,
     bassSound: 'roundBass',
     bassSynth: createSynthSettings('bass', 'roundBass'),
+    mixer: {
+      chordVolume: 0.9,
+      bassVolume: 0.9,
+      masterVolume: 0.95,
+    },
+    reverb: {
+      chordWet: 0.2,
+      bassWet: 0.16,
+    },
+    arranger: [],
     sections,
   };
+}
+
+function normalizeRepeat(value, fallback = 1) {
+  const repeat = clampInt(value, fallback, 1, 4);
+  return NOTE_REPEAT_OPTIONS.includes(repeat) ? repeat : fallback;
 }
 
 // =====================================================================
@@ -355,6 +371,8 @@ function normalizeChord(rawChord) {
     root: normalizeSemitone(chord.root, 0),
     type: CHORD_TYPES.some(entry => entry.name === chord.type) ? chord.type : 'maj',
     beats: clampInt(chord.beats, 4, 1, 64),
+    chordRepeat: normalizeRepeat(chord.chordRepeat, 1),
+    bassRepeat: normalizeRepeat(chord.bassRepeat, 1),
   };
 }
 
@@ -381,6 +399,16 @@ function normalizeSong(rawSong) {
   const selectedSectionExists = sections.some(section => section.id === parsed.selectedSectionId);
   const chordSound = resolvePresetId('chord', parsed.chordSound || parsed.chordSynth?.preset || base.chordSound);
   const bassSound = resolvePresetId('bass', parsed.bassSound || parsed.bassSynth?.preset || base.bassSound);
+  const sectionIds = new Set(sections.map(section => section.id));
+  const arranger = Array.isArray(parsed.arranger)
+    ? parsed.arranger
+      .map(entry => ({
+        id: entry?.id || makeId(),
+        sectionId: sectionIds.has(entry?.sectionId) ? entry.sectionId : sections[0].id,
+        repeats: clampInt(entry?.repeats, 1, 1, 16),
+      }))
+      .filter(entry => sectionIds.has(entry.sectionId))
+    : base.arranger;
 
   return {
     title: typeof parsed.title === 'string' ? parsed.title : base.title,
@@ -392,6 +420,16 @@ function normalizeSong(rawSong) {
     bassEnabled: parsed.bassEnabled === undefined ? base.bassEnabled : Boolean(parsed.bassEnabled),
     bassSound,
     bassSynth: normalizeSynthSettings('bass', parsed.bassSynth, bassSound),
+    mixer: {
+      chordVolume: clampNumber(parsed.mixer?.chordVolume, base.mixer.chordVolume, 0, 1),
+      bassVolume: clampNumber(parsed.mixer?.bassVolume, base.mixer.bassVolume, 0, 1),
+      masterVolume: clampNumber(parsed.mixer?.masterVolume, base.mixer.masterVolume, 0, 1),
+    },
+    reverb: {
+      chordWet: clampNumber(parsed.reverb?.chordWet, base.reverb.chordWet, 0, 1),
+      bassWet: clampNumber(parsed.reverb?.bassWet, base.reverb.bassWet, 0, 1),
+    },
+    arranger,
     sections,
   };
 }
@@ -446,6 +484,7 @@ function beatsToSeconds(beats) {
 function commitSong({ rerender = false, refreshCursor = false } = {}) {
   songVersion += 1;
   saveSong();
+  applyAudioMixSettings();
   if (rerender) {
     render();
     return;
@@ -468,6 +507,7 @@ function removeSection(id) {
     return;
   }
   song.sections = song.sections.filter(section => section.id !== id);
+  song.arranger = song.arranger.filter(entry => entry.sectionId !== id);
   if (song.selectedSectionId === id) song.selectedSectionId = song.sections[0]?.id || null;
   commitSong({ rerender: true, refreshCursor: true });
 }
@@ -491,6 +531,7 @@ function updateSectionName(id, name) {
   if (!section) return;
   section.name = name;
   commitSong();
+  renderArrangerPanel();
 }
 
 function updateSectionScale(id, root, type) {
@@ -562,7 +603,7 @@ function updateSynthField(kind, fieldKey, value) {
 function addChord(sectionId) {
   const section = song.sections.find(entry => entry.id === sectionId);
   if (!section) return;
-  section.chords.push({ id: makeId(), root: 0, type: 'maj', beats: 4 });
+  section.chords.push({ id: makeId(), root: 0, type: 'maj', beats: 4, chordRepeat: 1, bassRepeat: 1 });
   commitSong({ rerender: true, refreshCursor: true });
 }
 
@@ -614,6 +655,18 @@ function updateChordBeats(sectionId, chordId, rawBeats) {
   }, { refreshCursor: true });
 }
 
+function updateChordRepeat(sectionId, chordId, repeat) {
+  mutateChord(sectionId, chordId, chord => {
+    chord.chordRepeat = normalizeRepeat(repeat, chord.chordRepeat || 1);
+  }, { refreshCursor: true });
+}
+
+function updateBassRepeat(sectionId, chordId, repeat) {
+  mutateChord(sectionId, chordId, chord => {
+    chord.bassRepeat = normalizeRepeat(repeat, chord.bassRepeat || 1);
+  }, { refreshCursor: true });
+}
+
 function noteUp(sectionId, chordId) {
   mutateChord(sectionId, chordId, chord => { chord.root += 1; }, { rerender: true, refreshCursor: true });
 }
@@ -660,6 +713,62 @@ function updateBpm(raw) {
   const element = document.getElementById('bpm-input');
   if (element && parseInt(element.value, 10) !== value) element.value = value;
   commitSong();
+}
+
+function updateMixerField(field, value) {
+  if (!song.mixer) return;
+  if (!Object.prototype.hasOwnProperty.call(song.mixer, field)) return;
+  song.mixer[field] = clampNumber(value, song.mixer[field], 0, 1);
+  commitSong();
+}
+
+function updateReverbWet(kind, value) {
+  if (!song.reverb) return;
+  const key = kind === 'bass' ? 'bassWet' : 'chordWet';
+  song.reverb[key] = clampNumber(value, song.reverb[key], 0, 1);
+  commitSong();
+}
+
+function addArrangerEntry(sectionId) {
+  const fallbackId = song.sections[0]?.id;
+  const targetSectionId = song.sections.some(section => section.id === sectionId) ? sectionId : fallbackId;
+  if (!targetSectionId) return;
+  song.arranger.push({
+    id: makeId(),
+    sectionId: targetSectionId,
+    repeats: 1,
+  });
+  commitSong({ rerender: true, refreshCursor: true });
+}
+
+function removeArrangerEntry(entryId) {
+  song.arranger = song.arranger.filter(entry => entry.id !== entryId);
+  commitSong({ rerender: true, refreshCursor: true });
+}
+
+function updateArrangerEntry(entryId, updates) {
+  const entry = song.arranger.find(item => item.id === entryId);
+  if (!entry) return;
+  if (updates.sectionId && song.sections.some(section => section.id === updates.sectionId)) entry.sectionId = updates.sectionId;
+  if (updates.repeats !== undefined) entry.repeats = clampInt(updates.repeats, entry.repeats || 1, 1, 16);
+  commitSong({ refreshCursor: true });
+}
+
+function moveArrangerEntry(draggedEntryId, targetEntryId, placeAfter = false) {
+  if (!draggedEntryId || draggedEntryId === targetEntryId) return;
+  const fromIndex = song.arranger.findIndex(entry => entry.id === draggedEntryId);
+  if (fromIndex < 0) return;
+  const dragged = song.arranger.splice(fromIndex, 1)[0];
+  if (!targetEntryId) song.arranger.push(dragged);
+  else {
+    let targetIndex = song.arranger.findIndex(entry => entry.id === targetEntryId);
+    if (targetIndex < 0) song.arranger.push(dragged);
+    else {
+      if (placeAfter) targetIndex += 1;
+      song.arranger.splice(targetIndex, 0, dragged);
+    }
+  }
+  commitSong({ rerender: true, refreshCursor: true });
 }
 
 // =====================================================================
@@ -747,16 +856,21 @@ function sanitizeFilename(str) {
 // =====================================================================
 
 let audioCtx = null;
+let audioRouting = null;
 let schedulerTimer = null;
 let nextNoteTime = 0;
 let currentStep = 0;
 let isBeating = false;
 let songEndedPending = false;
 let playbackCursor = {
+  sequenceIndex: 0,
   sectionIndex: 0,
   chordIndex: 0,
   beatInChord: 0,
   beatInSection: 0,
+  arrangerEntryId: null,
+  arrangerEntryIndex: null,
+  arrangerRepeatIndex: 0,
   songBeatIndex: 0,
 };
 let lastHighlightedChordId = null;
@@ -772,9 +886,76 @@ const BEAT_PATTERN = {
 };
 
 function getAudioCtx() {
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    setupAudioRouting();
+  }
   if (audioCtx.state === 'suspended') audioCtx.resume();
   return audioCtx;
+}
+
+function createImpulseResponse(seconds = 1.8, decay = 2.2) {
+  const ctx = getAudioCtx();
+  const length = Math.floor(ctx.sampleRate * seconds);
+  const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
+  for (let channel = 0; channel < impulse.numberOfChannels; channel++) {
+    const data = impulse.getChannelData(channel);
+    for (let index = 0; index < length; index++) {
+      const t = index / Math.max(1, length - 1);
+      data[index] = (Math.random() * 2 - 1) * Math.pow(1 - t, decay);
+    }
+  }
+  return impulse;
+}
+
+function setupAudioRouting() {
+  if (!audioCtx || audioRouting) return;
+  const ctx = audioCtx;
+  const master = ctx.createGain();
+  master.connect(ctx.destination);
+
+  const makeInstrumentBus = () => {
+    const input = ctx.createGain();
+    const dry = ctx.createGain();
+    const wet = ctx.createGain();
+    const output = ctx.createGain();
+    const convolver = ctx.createConvolver();
+    convolver.buffer = createImpulseResponse();
+    input.connect(dry);
+    input.connect(convolver);
+    convolver.connect(wet);
+    dry.connect(output);
+    wet.connect(output);
+    output.connect(master);
+    return { input, dry, wet, output, convolver };
+  };
+
+  audioRouting = {
+    master,
+    chord: makeInstrumentBus(),
+    bass: makeInstrumentBus(),
+  };
+  applyAudioMixSettings();
+}
+
+function applyAudioMixSettings() {
+  if (!audioRouting) return;
+  const mixer = song.mixer || {};
+  const reverb = song.reverb || {};
+  const masterVolume = clampNumber(mixer.masterVolume, 0.95, 0, 1);
+
+  audioRouting.master.gain.value = masterVolume;
+  const setBus = (kind, volume, wet) => {
+    const bus = audioRouting[kind];
+    if (!bus) return;
+    const wetMix = clampNumber(wet, 0.2, 0, 1);
+    bus.output.gain.value = clampNumber(volume, 0.9, 0, 1);
+    bus.wet.gain.value = wetMix;
+    bus.dry.gain.value = 1 - wetMix;
+  };
+
+  setBus('chord', mixer.chordVolume, reverb.chordWet);
+  setBus('bass', mixer.bassVolume, reverb.bassWet);
 }
 
 function createNoiseBuffer(duration) {
@@ -903,7 +1084,7 @@ function scheduleADSR(gainNode, time, peak, sustain, attack, decay, release, dur
   return noteEnd;
 }
 
-function playSynthVoice(freq, time, duration, synthSettings) {
+function playSynthVoice(freq, time, duration, synthSettings, kind = 'chord') {
   const ctx = getAudioCtx();
   const voiceGain = ctx.createGain();
   const filter = ctx.createBiquadFilter();
@@ -911,7 +1092,7 @@ function playSynthVoice(freq, time, duration, synthSettings) {
   filter.frequency.setValueAtTime(synthSettings.cutoff, time);
   filter.Q.setValueAtTime(synthSettings.resonance, time);
   filter.connect(voiceGain);
-  voiceGain.connect(ctx.destination);
+  voiceGain.connect(audioRouting?.[kind]?.input || ctx.destination);
 
   const osc1 = ctx.createOscillator();
   const osc2 = ctx.createOscillator();
@@ -947,38 +1128,89 @@ function playSynthVoice(freq, time, duration, synthSettings) {
   osc2.stop(noteEnd + 0.02);
 }
 
-function playChordNotes(rootSemitone, typeName, when, beats = 4) {
+function playChordNotes(rootSemitone, typeName, when, beats = 4, repeats = 1) {
   const chordType = chordTypeObj(typeName);
   const rootMidi = 60 + rootSemitone;
-  const duration = Math.max(0.18, beatsToSeconds(beats) * 0.96);
-  chordType.intervals.forEach((interval, index) => {
-    playSynthVoice(
-      frequencyFromMidi(rootMidi + interval),
-      when + index * 0.01,
-      duration,
-      song.chordSynth,
-    );
-  });
+  const repeatCount = normalizeRepeat(repeats, 1);
+  const hitBeats = Math.max(0.25, beats / repeatCount);
+  const hitDuration = Math.max(0.1, beatsToSeconds(hitBeats) * 0.92);
+  for (let hit = 0; hit < repeatCount; hit++) {
+    const hitTime = when + beatsToSeconds(hit * hitBeats);
+    chordType.intervals.forEach((interval, index) => {
+      playSynthVoice(
+        frequencyFromMidi(rootMidi + interval),
+        hitTime + index * 0.01,
+        hitDuration,
+        song.chordSynth,
+        'chord',
+      );
+    });
+  }
 }
 
-function playBassNote(rootSemitone, when, beats = 4) {
+function playBassNote(rootSemitone, when, beats = 4, repeats = 1) {
   const bassMidi = 36 + rootSemitone;
-  const duration = Math.max(0.16, beatsToSeconds(beats) * 0.92);
-  playSynthVoice(frequencyFromMidi(bassMidi), when, duration, song.bassSynth);
+  const repeatCount = normalizeRepeat(repeats, 1);
+  const hitBeats = Math.max(0.25, beats / repeatCount);
+  const hitDuration = Math.max(0.09, beatsToSeconds(hitBeats) * 0.9);
+  for (let hit = 0; hit < repeatCount; hit++) {
+    const hitTime = when + beatsToSeconds(hit * hitBeats);
+    playSynthVoice(frequencyFromMidi(bassMidi), hitTime, hitDuration, song.bassSynth, 'bass');
+  }
 }
 
 function getSectionBeatLength(section) {
   return section.chords.reduce((sum, chord) => sum + (chord.beats || 4), 0);
 }
 
+function getSongSectionSequence() {
+  if (Array.isArray(song.arranger) && song.arranger.length) {
+    const sequence = [];
+    song.arranger.forEach((entry, arrangerEntryIndex) => {
+      const sectionIndex = song.sections.findIndex(section => section.id === entry.sectionId);
+      if (sectionIndex < 0) return;
+      const repeats = clampInt(entry.repeats, 1, 1, 16);
+      for (let repeatIndex = 0; repeatIndex < repeats; repeatIndex++) {
+        sequence.push({
+          sectionIndex,
+          arrangerEntryId: entry.id,
+          arrangerEntryIndex,
+          arrangerRepeatIndex: repeatIndex,
+        });
+      }
+    });
+    if (sequence.length) return sequence;
+  }
+  return song.sections.map((_, sectionIndex) => ({
+    sectionIndex,
+    arrangerEntryId: null,
+    arrangerEntryIndex: null,
+    arrangerRepeatIndex: 0,
+  }));
+}
+
 function buildSongBeatMap() {
   const map = [];
-  song.sections.forEach((section, sectionIndex) => {
+  const sequence = getSongSectionSequence();
+  sequence.forEach((sequencePoint, sequenceIndex) => {
+    const section = song.sections[sequencePoint.sectionIndex];
+    if (!section) return;
+    let beatInSection = 0;
     section.chords.forEach((chord, chordIndex) => {
       const beats = chord.beats || 4;
       for (let beatInChord = 0; beatInChord < beats; beatInChord++) {
-        map.push({ sectionIndex, chordIndex, beatInChord });
+        map.push({
+          sequenceIndex,
+          sectionIndex: sequencePoint.sectionIndex,
+          chordIndex,
+          beatInChord,
+          beatInSection: beatInSection + beatInChord,
+          arrangerEntryId: sequencePoint.arrangerEntryId,
+          arrangerEntryIndex: sequencePoint.arrangerEntryIndex,
+          arrangerRepeatIndex: sequencePoint.arrangerRepeatIndex,
+        });
       }
+      beatInSection += beats;
     });
   });
   return map;
@@ -997,7 +1229,10 @@ function formatPlaybackPosition(sectionIndex, chordIndex, beatInChord) {
   if (!section) return 'Position: —';
   const chord = section.chords[chordIndex];
   if (!chord) return `Position: ${section.name} • (no chords)`;
-  return `Position: ${section.name} • ${formatPitchLabel(chord.root)}${chord.type} • beat ${beatInChord + 1}/${chord.beats || 4}`;
+  const arrangerInfo = song.arranger?.length
+    ? ` • slot ${playbackCursor.arrangerEntryIndex + 1}.${playbackCursor.arrangerRepeatIndex + 1}`
+    : '';
+  return `Position: ${section.name}${arrangerInfo} • ${formatPitchLabel(chord.root)}${chord.type} • beat ${beatInChord + 1}/${chord.beats || 4}`;
 }
 
 function updatePlaybackPositionUI(sectionIndex, chordIndex, beatInChord, songBeatIndex) {
@@ -1024,13 +1259,14 @@ function setSongPositionFromSlider(rawValue) {
   if (!map.length) return;
   const index = Math.max(0, Math.min(map.length - 1, clampInt(rawValue, 0, 0, map.length - 1)));
   const point = map[index];
+  playbackCursor.sequenceIndex = point.sequenceIndex;
   playbackCursor.sectionIndex = point.sectionIndex;
   playbackCursor.chordIndex = point.chordIndex;
   playbackCursor.beatInChord = point.beatInChord;
-  const section = song.sections[point.sectionIndex];
-  let sectionOffset = 0;
-  for (let chordIndex = 0; chordIndex < point.chordIndex; chordIndex++) sectionOffset += section.chords[chordIndex].beats || 4;
-  playbackCursor.beatInSection = sectionOffset + point.beatInChord;
+  playbackCursor.beatInSection = point.beatInSection;
+  playbackCursor.arrangerEntryId = point.arrangerEntryId;
+  playbackCursor.arrangerEntryIndex = point.arrangerEntryIndex;
+  playbackCursor.arrangerRepeatIndex = point.arrangerRepeatIndex;
   playbackCursor.songBeatIndex = index;
   updatePlaybackPositionUI(playbackCursor.sectionIndex, playbackCursor.chordIndex, playbackCursor.beatInChord, playbackCursor.songBeatIndex);
 }
@@ -1044,15 +1280,40 @@ function initializePlaybackCursor() {
   let sectionIndex = song.sections.findIndex(section => section.id === song.selectedSectionId);
   if (sectionIndex < 0) sectionIndex = 0;
   playbackCursor.sectionIndex = sectionIndex;
+  playbackCursor.sequenceIndex = sectionIndex;
   playbackCursor.chordIndex = 0;
   playbackCursor.beatInChord = 0;
   playbackCursor.beatInSection = 0;
+  playbackCursor.arrangerEntryId = null;
+  playbackCursor.arrangerEntryIndex = null;
+  playbackCursor.arrangerRepeatIndex = 0;
   playbackCursor.songBeatIndex = 0;
   updatePlaybackPositionUI(playbackCursor.sectionIndex, 0, 0, 0);
 }
 
 function advancePlaybackCursor() {
   const mode = song.playbackMode || 'edit';
+  if (mode === 'song') {
+    const map = buildSongBeatMap();
+    if (!map.length) return;
+    const nextIndex = playbackCursor.songBeatIndex + 1;
+    if (nextIndex >= map.length) {
+      songEndedPending = true;
+      return;
+    }
+    const point = map[nextIndex];
+    playbackCursor.sequenceIndex = point.sequenceIndex;
+    playbackCursor.sectionIndex = point.sectionIndex;
+    playbackCursor.chordIndex = point.chordIndex;
+    playbackCursor.beatInChord = point.beatInChord;
+    playbackCursor.beatInSection = point.beatInSection;
+    playbackCursor.arrangerEntryId = point.arrangerEntryId;
+    playbackCursor.arrangerEntryIndex = point.arrangerEntryIndex;
+    playbackCursor.arrangerRepeatIndex = point.arrangerRepeatIndex;
+    playbackCursor.songBeatIndex = nextIndex;
+    return;
+  }
+
   const section = song.sections[playbackCursor.sectionIndex];
   if (!section) return;
   const chord = section.chords[playbackCursor.chordIndex];
@@ -1060,7 +1321,6 @@ function advancePlaybackCursor() {
 
   playbackCursor.beatInChord += 1;
   playbackCursor.beatInSection += 1;
-  if (mode === 'song') playbackCursor.songBeatIndex += 1;
 
   if (playbackCursor.beatInChord >= (chord.beats || 4)) {
     playbackCursor.beatInChord = 0;
@@ -1087,21 +1347,16 @@ function advancePlaybackCursor() {
 
 function scheduleMusicalBeat(time) {
   if (!song.sections.length) return;
+  if ((song.playbackMode || 'edit') === 'song' && !buildSongBeatMap().length) {
+    songEndedPending = true;
+    return;
+  }
   const section = song.sections[playbackCursor.sectionIndex];
   if (!section) return;
 
   if (!section.chords.length) {
     updatePlaybackPositionUI(playbackCursor.sectionIndex, 0, 0, playbackCursor.songBeatIndex);
-    if ((song.playbackMode || 'edit') === 'song') {
-      playbackCursor.sectionIndex += 1;
-      playbackCursor.chordIndex = 0;
-      playbackCursor.beatInChord = 0;
-      playbackCursor.beatInSection = 0;
-      if (playbackCursor.sectionIndex >= song.sections.length) {
-        playbackCursor.sectionIndex = song.sections.length - 1;
-        songEndedPending = true;
-      }
-    }
+    if ((song.playbackMode || 'edit') === 'song') advancePlaybackCursor();
     return;
   }
 
@@ -1110,8 +1365,8 @@ function scheduleMusicalBeat(time) {
 
   if (playbackCursor.beatInSection === 0 && section.crashOnStart) playCrash(time);
   if (playbackCursor.beatInChord === 0) {
-    playChordNotes(chord.root, chord.type, time, chord.beats || 4);
-    if (song.bassEnabled) playBassNote(chord.root, time, chord.beats || 4);
+    playChordNotes(chord.root, chord.type, time, chord.beats || 4, chord.chordRepeat || 1);
+    if (song.bassEnabled) playBassNote(chord.root, time, chord.beats || 4, chord.bassRepeat || 1);
   }
 
   const sectionBeats = getSectionBeatLength(section);
@@ -1196,6 +1451,8 @@ function render() {
   const modeElement = document.getElementById('playback-mode-select');
   if (modeElement) modeElement.value = song.playbackMode || 'edit';
 
+  renderMixerPanel();
+  renderArrangerPanel();
   renderSynthRack();
 
   const container = document.getElementById('sections-container');
@@ -1205,6 +1462,179 @@ function render() {
   updateSongGoToControl();
   updatePlaybackModeUI();
   initializePlaybackCursor();
+  applyAudioMixSettings();
+}
+
+function renderMixerPanel() {
+  const panel = document.getElementById('mixer-panel');
+  if (!panel) return;
+  panel.innerHTML = '';
+
+  const title = document.createElement('h2');
+  title.textContent = 'Mixer';
+  const help = document.createElement('p');
+  help.className = 'mixer-help';
+  help.textContent = 'Balance chord and bass levels. Reverb wet/dry is per instrument in each synth card.';
+
+  const controls = document.createElement('div');
+  controls.className = 'mixer-controls';
+  controls.append(
+    buildMixerSlider('Chords', song.mixer.chordVolume, value => updateMixerField('chordVolume', value)),
+    buildMixerSlider('Bass', song.mixer.bassVolume, value => updateMixerField('bassVolume', value)),
+    buildMixerSlider('Output', song.mixer.masterVolume, value => updateMixerField('masterVolume', value)),
+  );
+
+  panel.append(title, help, controls);
+}
+
+function buildMixerSlider(labelText, value, onInput) {
+  const wrap = document.createElement('label');
+  wrap.className = 'mixer-slider';
+
+  const top = document.createElement('div');
+  top.className = 'mixer-slider-top';
+  const label = document.createElement('span');
+  label.textContent = labelText;
+  const valueText = document.createElement('span');
+  valueText.className = 'mixer-slider-value';
+  valueText.textContent = `${Math.round(value * 100)}%`;
+  top.append(label, valueText);
+
+  const input = document.createElement('input');
+  input.type = 'range';
+  input.min = '0';
+  input.max = '1';
+  input.step = '0.01';
+  input.value = String(value);
+  input.addEventListener('input', () => {
+    valueText.textContent = `${Math.round(Number(input.value) * 100)}%`;
+    onInput(input.value);
+  });
+
+  wrap.append(top, input);
+  return wrap;
+}
+
+function renderArrangerPanel() {
+  const panel = document.getElementById('arranger-panel');
+  if (!panel) return;
+  panel.innerHTML = '';
+
+  const title = document.createElement('h2');
+  title.textContent = 'Song Arranger';
+  const help = document.createElement('p');
+  help.className = 'arranger-help';
+  help.textContent = 'Drag arranger rows to set Song mode order. Each row picks a section and repeat count. Empty arranger falls back to section order.';
+
+  const addRow = document.createElement('div');
+  addRow.className = 'arranger-add-row';
+  const addSelect = document.createElement('select');
+  addSelect.id = 'arranger-add-section';
+  song.sections.forEach(section => {
+    const option = document.createElement('option');
+    option.value = section.id;
+    option.textContent = section.name;
+    addSelect.appendChild(option);
+  });
+  const addButton = document.createElement('button');
+  addButton.className = 'action-btn';
+  addButton.textContent = '+ Add to arranger';
+  addButton.addEventListener('click', () => addArrangerEntry(addSelect.value));
+  addRow.append(addSelect, addButton);
+
+  const list = document.createElement('div');
+  list.className = 'arranger-list';
+  list.addEventListener('dragover', event => {
+    event.preventDefault();
+    list.classList.add('drag-over');
+  });
+  list.addEventListener('dragleave', () => list.classList.remove('drag-over'));
+  list.addEventListener('drop', event => {
+    event.preventDefault();
+    list.classList.remove('drag-over');
+    const draggedEntryId = event.dataTransfer.getData('text/arranger-entry-id');
+    if (draggedEntryId) moveArrangerEntry(draggedEntryId, null, true);
+  });
+
+  if (!song.arranger.length) {
+    const empty = document.createElement('div');
+    empty.className = 'arranger-empty';
+    empty.textContent = 'No arranger entries yet. Song mode will play sections top-to-bottom.';
+    list.appendChild(empty);
+  } else {
+    song.arranger.forEach((entry, index) => list.appendChild(buildArrangerEntry(entry, index)));
+  }
+
+  panel.append(title, help, addRow, list);
+}
+
+function buildArrangerEntry(entry, index) {
+  const row = document.createElement('div');
+  row.className = 'arranger-entry';
+  row.id = 'arranger-entry-' + entry.id;
+  row.draggable = true;
+
+  const dragHandle = document.createElement('span');
+  dragHandle.className = 'arranger-drag';
+  dragHandle.textContent = '↕';
+  dragHandle.title = 'Drag to reorder';
+
+  const order = document.createElement('span');
+  order.className = 'arranger-order';
+  order.textContent = String(index + 1);
+
+  const sectionSelect = document.createElement('select');
+  sectionSelect.className = 'arranger-section-select';
+  song.sections.forEach(section => {
+    const option = document.createElement('option');
+    option.value = section.id;
+    option.textContent = section.name;
+    if (section.id === entry.sectionId) option.selected = true;
+    sectionSelect.appendChild(option);
+  });
+  sectionSelect.addEventListener('change', () => updateArrangerEntry(entry.id, { sectionId: sectionSelect.value }));
+
+  const repeatsSelect = document.createElement('select');
+  repeatsSelect.className = 'arranger-repeat-select';
+  for (let repeat = 1; repeat <= 16; repeat++) {
+    const option = document.createElement('option');
+    option.value = String(repeat);
+    option.textContent = `x${repeat}`;
+    if (repeat === (entry.repeats || 1)) option.selected = true;
+    repeatsSelect.appendChild(option);
+  }
+  repeatsSelect.addEventListener('change', () => updateArrangerEntry(entry.id, { repeats: repeatsSelect.value }));
+
+  const removeButton = document.createElement('button');
+  removeButton.className = 'remove-chord-btn arranger-remove-btn';
+  removeButton.textContent = '✕';
+  removeButton.title = 'Remove arranger entry';
+  removeButton.addEventListener('click', () => removeArrangerEntry(entry.id));
+
+  row.addEventListener('dragstart', event => {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/arranger-entry-id', entry.id);
+    row.classList.add('dragging');
+  });
+  row.addEventListener('dragend', () => row.classList.remove('dragging'));
+  row.addEventListener('dragover', event => {
+    event.preventDefault();
+    row.classList.add('drag-over');
+  });
+  row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+  row.addEventListener('drop', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    row.classList.remove('drag-over');
+    const draggedEntryId = event.dataTransfer.getData('text/arranger-entry-id');
+    if (!draggedEntryId || draggedEntryId === entry.id) return;
+    const rect = row.getBoundingClientRect();
+    const placeAfter = event.clientY > rect.top + rect.height / 2;
+    moveArrangerEntry(draggedEntryId, entry.id, placeAfter);
+  });
+
+  row.append(dragHandle, order, sectionSelect, repeatsSelect, removeButton);
+  return row;
 }
 
 function renderSynthRack() {
@@ -1231,7 +1661,7 @@ function buildSynthCard(kind) {
   title.textContent = kind === 'bass' ? 'Bass synth' : 'Chord synth';
   const subtitle = document.createElement('p');
   subtitle.className = 'synth-subtitle';
-  subtitle.textContent = '2 osc • ADSR • filter';
+  subtitle.textContent = '2 osc • ADSR • filter • reverb wet/dry';
   titleWrap.append(title, subtitle);
 
   const controls = document.createElement('div');
@@ -1280,9 +1710,40 @@ function buildSynthCard(kind) {
   const controlsGrid = document.createElement('div');
   controlsGrid.className = 'synth-controls-grid';
   SYNTH_UI_FIELDS.forEach(field => controlsGrid.appendChild(buildSynthSlider(kind, synth, field)));
+  controlsGrid.appendChild(buildReverbSlider(kind));
 
   card.append(header, detailGrid, controlsGrid);
   return card;
+}
+
+function buildReverbSlider(kind) {
+  const key = kind === 'bass' ? 'bassWet' : 'chordWet';
+  const row = document.createElement('label');
+  row.className = 'synth-slider';
+
+  const top = document.createElement('div');
+  top.className = 'synth-slider-top';
+  const label = document.createElement('span');
+  label.textContent = 'Reverb';
+  const value = document.createElement('span');
+  value.className = 'synth-slider-value';
+  value.textContent = `${Math.round(song.reverb[key] * 100)}% wet`;
+  top.append(label, value);
+
+  const input = document.createElement('input');
+  input.type = 'range';
+  input.min = '0';
+  input.max = '1';
+  input.step = '0.01';
+  input.value = String(song.reverb[key]);
+  input.setAttribute('aria-label', `${kind} reverb wet`);
+  input.addEventListener('input', () => {
+    value.textContent = `${Math.round(Number(input.value) * 100)}% wet`;
+    updateReverbWet(kind, input.value);
+  });
+
+  row.append(top, input);
+  return row;
 }
 
 function buildSynthMetaChip(labelText, valueText) {
@@ -1362,6 +1823,8 @@ function updateChordCard(sectionId, chordId) {
   const offsetElement = document.getElementById('root-offset-' + chordId);
   const qualityElement = document.getElementById('qual-' + chordId);
   const beatsElement = document.getElementById('beats-' + chordId);
+  const chordRepeatElement = document.getElementById('chord-repeat-' + chordId);
+  const bassRepeatElement = document.getElementById('bass-repeat-' + chordId);
   if (rootElement) rootElement.textContent = noteName(chord.root);
   if (offsetElement) {
     const offset = formatPitchOffset(chord.root);
@@ -1372,6 +1835,8 @@ function updateChordCard(sectionId, chordId) {
     qualityElement.title = chordTypeObj(chord.type).label;
   }
   if (beatsElement) beatsElement.value = chord.beats || 4;
+  if (chordRepeatElement) chordRepeatElement.value = String(chord.chordRepeat || 1);
+  if (bassRepeatElement) bassRepeatElement.value = String(chord.bassRepeat || 1);
 }
 
 function renderArrangementPanel(sectionId) {
@@ -1580,7 +2045,8 @@ function buildArrangementBlock(section, chord, laneType, index) {
 
   const beats = document.createElement('span');
   beats.className = 'arrangement-block-beats';
-  beats.textContent = `${chord.beats || 4}b`;
+  if (laneType === 'bass') beats.textContent = `${chord.beats || 4}b • x${chord.bassRepeat || 1}`;
+  else beats.textContent = `${chord.beats || 4}b • x${chord.chordRepeat || 1}`;
 
   block.append(label, beats);
 
@@ -1673,6 +2139,49 @@ function buildChordCard(chord, sectionId) {
   beatsInput.addEventListener('input', () => updateChordBeats(sectionId, chord.id, beatsInput.value));
   beatsRow.append(beatsLabel, beatsInput);
 
+  const repeatRow = document.createElement('div');
+  repeatRow.className = 'repeat-row';
+
+  const chordRepeatLabel = document.createElement('label');
+  chordRepeatLabel.textContent = 'Chord x';
+  chordRepeatLabel.setAttribute('for', 'chord-repeat-' + chord.id);
+  const chordRepeatSelect = document.createElement('select');
+  chordRepeatSelect.id = 'chord-repeat-' + chord.id;
+  chordRepeatSelect.className = 'repeat-select';
+  NOTE_REPEAT_OPTIONS.forEach(value => {
+    const option = document.createElement('option');
+    option.value = String(value);
+    option.textContent = String(value);
+    if (value === (chord.chordRepeat || 1)) option.selected = true;
+    chordRepeatSelect.appendChild(option);
+  });
+  chordRepeatSelect.addEventListener('change', () => updateChordRepeat(sectionId, chord.id, chordRepeatSelect.value));
+
+  const bassRepeatLabel = document.createElement('label');
+  bassRepeatLabel.textContent = 'Bass x';
+  bassRepeatLabel.setAttribute('for', 'bass-repeat-' + chord.id);
+  const bassRepeatSelect = document.createElement('select');
+  bassRepeatSelect.id = 'bass-repeat-' + chord.id;
+  bassRepeatSelect.className = 'repeat-select';
+  NOTE_REPEAT_OPTIONS.forEach(value => {
+    const option = document.createElement('option');
+    option.value = String(value);
+    option.textContent = String(value);
+    if (value === (chord.bassRepeat || 1)) option.selected = true;
+    bassRepeatSelect.appendChild(option);
+  });
+  bassRepeatSelect.addEventListener('change', () => updateBassRepeat(sectionId, chord.id, bassRepeatSelect.value));
+
+  const chordRepeatWrap = document.createElement('div');
+  chordRepeatWrap.className = 'repeat-field';
+  chordRepeatWrap.append(chordRepeatLabel, chordRepeatSelect);
+
+  const bassRepeatWrap = document.createElement('div');
+  bassRepeatWrap.className = 'repeat-field';
+  bassRepeatWrap.append(bassRepeatLabel, bassRepeatSelect);
+
+  repeatRow.append(chordRepeatWrap, bassRepeatWrap);
+
   const actionBar = document.createElement('div');
   actionBar.className = 'chord-action-bar';
 
@@ -1691,7 +2200,7 @@ function buildChordCard(chord, sectionId) {
   removeButton.addEventListener('click', () => removeChord(sectionId, chord.id));
 
   actionBar.append(auditionButton, removeButton);
-  card.append(rootElement, offsetElement, qualityElement, divider1, noteRow, typeRow, transposeRow, divider2, beatsRow, actionBar);
+  card.append(rootElement, offsetElement, qualityElement, divider1, noteRow, typeRow, transposeRow, divider2, beatsRow, repeatRow, actionBar);
   return card;
 }
 
@@ -1732,12 +2241,13 @@ function makeIconBtn(text, title, onClick) {
 }
 
 function updatePlaybackHighlights() {
-  document.querySelectorAll('.arrangement-block.playing, .chord-card.playing').forEach(element => element.classList.remove('playing'));
+  document.querySelectorAll('.arrangement-block.playing, .chord-card.playing, .arranger-entry.playing').forEach(element => element.classList.remove('playing'));
   if (!isBeating) return;
   const section = song.sections[playbackCursor.sectionIndex];
   const chord = section?.chords[playbackCursor.chordIndex];
   if (!chord) return;
   lastHighlightedChordId = chord.id;
+  if (playbackCursor.arrangerEntryId) document.getElementById(`arranger-entry-${playbackCursor.arrangerEntryId}`)?.classList.add('playing');
   document.getElementById(`arrangement-chords-${chord.id}`)?.classList.add('playing');
   document.getElementById(`arrangement-bass-${chord.id}`)?.classList.add('playing');
   document.getElementById(`chord-card-${chord.id}`)?.classList.add('playing');

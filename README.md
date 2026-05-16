@@ -11,14 +11,18 @@ A browser-based, dependency-free web app for building chord progressions and son
 * **Scales** – Each section has a configurable scale root and type (Major, Natural Minor, Harmonic Minor, Melodic Minor, Major Pentatonic, Minor Pentatonic, Blues, Dorian, Phrygian, Lydian, Mixolydian, Aeolian, Locrian, Chromatic). The notes in the chosen scale are shown inline.
 * **Transposition** – Transpose individual chords or the whole song up/down by semitone without wrapping at 12; note labels stay readable and show octave/semitone offsets when needed.
 * **Playback modes** – `Edit` mode loops the selected section (via per-section radio button). `Song` mode plays the full arrangement once from start to finish.
-* **Go to / scrub head** – In Song mode, jump to any beat position with the timeline slider. Current section/chord/beat is shown live.
+* **Go to / scrub head** – In Song mode, jump to any beat position with the timeline slider. Current section/chord/beat is shown live, including arranger slot/repeat context when arranger entries are used.
 * **Chord lengths** – Every chord defaults to `4` beats (1 bar) and can be changed to any beat length.
+* **Per-segment repeats (chord + bass)** – Each chord segment has `Chord x` and `Bass x` repeat selectors (`1`, `2`, `4`) so you can subdivide the same segment into repeated hits independently for chord and bass.
 * **2-oscillator chord + bass synths** – Separate chord and bass synth panels with presets, ADSR, filter cutoff, resonance, oscillator mix/detune defaults, and bass enable/disable.
+* **Per-instrument reverb wet/dry** – Chord and bass synth cards each include a dedicated reverb wet control so ambience can be shaped independently.
+* **Mixer section** – Dedicated mixer controls for chord level, bass level, and overall output level.
 * **Visible bass section** – The bass synth controls live directly below the chord synth controls so bass settings are always visible.
 * **DAW-style arrangement lanes** – Each section shows chord and bass lanes with beat-proportional blocks. Drag blocks to reorder the progression and the chord cards update to match.
+* **Draggable arranger** – Add section entries, set repeat counts per entry, and drag to reorder song playback order. Song mode follows arranger entries/repeats when present, and falls back to section order when arranger is empty.
 * **Section transitions** – Optional per-section crash cymbal at section start and roll at section end.
 * **Beat** – A kick/snare/hi-hat beat plays via the Web Audio API at the selected BPM. Adjust BPM with the +/− buttons or type directly.
-* **Persistence** – Songs are saved automatically to `localStorage`. Export/import includes playback mode, chord beat lengths, synth presets/settings, DAW ordering, crash/roll options, bass settings, and sound selections.
+* **Persistence** – Songs are saved automatically to `localStorage`. Export/import includes sections/chords, chord lengths, chord+bass repeats, synth settings, per-instrument reverb, mixer levels, DAW ordering, crash/roll options, arranger order/repeats, playback mode, and sound selections.
 
 ## Running locally
 
