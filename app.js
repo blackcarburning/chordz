@@ -1963,7 +1963,7 @@ function renderDrumSequencer() {
   panel.append(header, controlsRow, grid);
 }
 
-function renderMixerPanel() {
+function render() {
   song = normalizeSong(song);
 
   const titleElement = document.getElementById('song-title');
