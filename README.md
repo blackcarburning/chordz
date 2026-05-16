@@ -10,8 +10,13 @@ A browser-based, dependency-free web app for building chord progressions and son
 * **Chord audition** – Click ♫ on any chord card to hear it as an arpeggiated chord via the Web Audio API.
 * **Scales** – Each section has a configurable scale root and type (Major, Natural Minor, Harmonic Minor, Melodic Minor, Major Pentatonic, Minor Pentatonic, Blues, Dorian, Phrygian, Lydian, Mixolydian, Aeolian, Locrian, Chromatic). The notes in the chosen scale are shown inline.
 * **Transposition** – Transpose individual chords or the whole song up/down by semitone.
+* **Playback modes** – `Edit` mode loops the selected section (via per-section radio button). `Song` mode plays the full arrangement once from start to finish.
+* **Go to / scrub head** – In Song mode, jump to any beat position with the timeline slider. Current section/chord/beat is shown live.
+* **Chord lengths** – Every chord defaults to `4` beats (1 bar) and can be changed to any beat length.
+* **Bass + sounds** – Separate bass playback (toggle on/off) and separate sound preset selectors for chords and bass.
+* **Section transitions** – Optional per-section crash cymbal at section start and roll at section end.
 * **Beat** – A kick/snare/hi-hat beat plays via the Web Audio API at the selected BPM. Adjust BPM with the +/− buttons or type directly.
-* **Persistence** – Songs are saved automatically to `localStorage`. Export to JSON or import from a saved JSON file. Reset at any time.
+* **Persistence** – Songs are saved automatically to `localStorage`. Export/import includes playback mode, chord beat lengths, crash/roll options, bass settings, and sound selections.
 
 ## Running locally
 
