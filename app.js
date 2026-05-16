@@ -499,6 +499,35 @@ let song = createDefaultSong();
 let songVersion = 0;
 const synthPanelExpanded = { chord: true, bass: true };
 let editingDrumPatternId = null;
+let activePitchTarget = null;
+
+function setActivePitchTarget(sectionId, chordId, kind = 'chord') {
+  if (!sectionId || !chordId) return;
+  activePitchTarget = {
+    sectionId,
+    chordId,
+    kind: kind === 'bass' ? 'bass' : 'chord',
+  };
+}
+
+function getActivePitchTarget() {
+  if (!activePitchTarget) return null;
+  const section = song.sections.find(entry => entry.id === activePitchTarget.sectionId);
+  if (!section) {
+    activePitchTarget = null;
+    return null;
+  }
+  const chord = section.chords.find(entry => entry.id === activePitchTarget.chordId);
+  if (!chord) {
+    activePitchTarget = null;
+    return null;
+  }
+  return {
+    sectionId: section.id,
+    chordId: chord.id,
+    kind: activePitchTarget.kind === 'bass' ? 'bass' : 'chord',
+  };
+}
 
 function normalizeChord(rawChord) {
   const chord = rawChord || {};
@@ -904,6 +933,7 @@ function updateChordStartBeat(sectionId, chordId, startBeat) {
 }
 
 function noteUp(sectionId, chordId) {
+  setActivePitchTarget(sectionId, chordId, 'chord');
   mutateChord(sectionId, chordId, chord => {
     const section = song.sections.find(entry => entry.id === sectionId);
     chord.root = stepPitchBySectionScale(section, chord.root, 1);
@@ -912,6 +942,7 @@ function noteUp(sectionId, chordId) {
 }
 
 function noteDown(sectionId, chordId) {
+  setActivePitchTarget(sectionId, chordId, 'chord');
   mutateChord(sectionId, chordId, chord => {
     const section = song.sections.find(entry => entry.id === sectionId);
     chord.root = stepPitchBySectionScale(section, chord.root, -1);
@@ -920,6 +951,7 @@ function noteDown(sectionId, chordId) {
 }
 
 function bassPitchUp(sectionId, chordId) {
+  setActivePitchTarget(sectionId, chordId, 'bass');
   mutateChord(sectionId, chordId, chord => {
     if ((song.bassPitchMode || 'linked') !== 'free') return;
     const section = song.sections.find(entry => entry.id === sectionId);
@@ -929,6 +961,7 @@ function bassPitchUp(sectionId, chordId) {
 }
 
 function bassPitchDown(sectionId, chordId) {
+  setActivePitchTarget(sectionId, chordId, 'bass');
   mutateChord(sectionId, chordId, chord => {
     if ((song.bassPitchMode || 'linked') !== 'free') return;
     const section = song.sections.find(entry => entry.id === sectionId);
@@ -2921,6 +2954,7 @@ function buildArrangementBlock(section, chord, laneType, index) {
 }
 
 function focusNoteEditorForChord(sectionId, chordId, kind) {
+  setActivePitchTarget(sectionId, chordId, kind);
   if (song.selectedSectionId !== sectionId) selectEditSection(sectionId);
   const card = document.getElementById('chord-card-' + chordId);
   if (!card) return;
@@ -2929,6 +2963,23 @@ function focusNoteEditorForChord(sectionId, chordId, kind) {
     : '.ctrl-row[data-note-editor-kind="chord"] .arrow-btn:not(:disabled)';
   const target = card.querySelector(selector) || document.getElementById(kind === 'bass' ? 'bass-preset-select' : 'chord-preset-select');
   if (target && typeof target.focus === 'function') target.focus();
+}
+
+function handlePitchArrowKey(event) {
+  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+  if (event.altKey || event.ctrlKey || event.metaKey) return;
+  const activeElement = document.activeElement;
+  if (activeElement && activeElement.closest && activeElement.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) return;
+  const target = getActivePitchTarget();
+  if (!target) return;
+  event.preventDefault();
+  if (target.kind === 'bass') {
+    if (event.key === 'ArrowUp') bassPitchUp(target.sectionId, target.chordId);
+    else bassPitchDown(target.sectionId, target.chordId);
+    return;
+  }
+  if (event.key === 'ArrowUp') noteUp(target.sectionId, target.chordId);
+  else noteDown(target.sectionId, target.chordId);
 }
 
 function buildChordsArea(section) {
@@ -2949,6 +3000,13 @@ function buildChordCard(chord, sectionId) {
   card.className = 'chord-card';
   card.id = 'chord-card-' + chord.id;
   card.setAttribute('aria-label', `${formatPitchLabel(chord.root)}${chord.type} chord`);
+  card.addEventListener('click', event => {
+    if (event.target?.closest?.('.ctrl-row[data-note-editor-kind="bass"]')) {
+      setActivePitchTarget(sectionId, chord.id, 'bass');
+      return;
+    }
+    setActivePitchTarget(sectionId, chord.id, 'chord');
+  });
 
   const rootElement = document.createElement('div');
   rootElement.className = 'chord-root';
@@ -3190,6 +3248,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadSong();
   song = normalizeSong(song);
   render();
+  document.addEventListener('keydown', handlePitchArrowKey);
 
   document.getElementById('song-title').addEventListener('input', saveSong);
   document.getElementById('song-title').addEventListener('blur', () => {
