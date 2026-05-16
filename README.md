@@ -29,6 +29,7 @@ Replaces the old preset beat with a fully editable pattern-based drum sequencer:
 * **10 nameable pattern slots** – The song stores 10 independent patterns. Switch between them with the **Edit pattern** dropdown in the sequencer panel, then rename using the **Pattern name** field. The first three patterns come with starter grooves (Rock Beat, Funk, Ballad); the remaining seven are blank.
 * **Per-section drum pattern assignment** – Each song section has a **Drum pattern** dropdown in its options row. This chooses which of the 10 patterns plays when that section is active.
 * **Arranger integration** – Song-mode playback through the arranger uses the pattern assigned to the currently playing section; repeated sections use the same pattern each time.
+* **Contained layout** – The sequencer is rendered in its own panel above the synth controls, with horizontal scrolling kept inside the grid area so the page layout stays stable.
 
 * **UI order** – The drum sequencer panel appears above the synth controls for quick access during composition.
 * **DAW-style arrangement lanes** – Each section shows chord and bass lanes with beat-proportional blocks. Drag blocks to reorder the progression and the chord cards update to match.
