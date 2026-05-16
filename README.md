@@ -15,14 +15,16 @@ A browser-based, dependency-free web app for building chord progressions and son
 * **Chord lengths** – Every chord defaults to `4` beats (1 bar) and can be changed to any beat length.
 * **Per-segment repeats (chord + bass)** – Each chord segment has `Chord x` and `Bass x` repeat selectors (`1`, `2`, `4`) so you can subdivide the same segment into repeated hits independently for chord and bass.
 * **2-oscillator chord + bass synths** – Separate chord and bass synth panels with presets, ADSR, filter cutoff, resonance, oscillator mix/detune defaults, and bass enable/disable.
+* **Collapsible synth controls** – Chord and bass synth panels can be collapsed/expanded to keep the interface tidy without losing settings.
 * **Per-instrument reverb wet/dry** – Chord and bass synth cards each include a dedicated reverb wet control so ambience can be shaped independently.
 * **Mixer section** – Dedicated mixer controls for chord level, bass level, and overall output level.
-* **Visible bass section** – The bass synth controls live directly below the chord synth controls so bass settings are always visible.
+* **UI order update** – Synth controls appear above the arranger; the arranger panel sits below them for cleaner workflow.
 * **DAW-style arrangement lanes** – Each section shows chord and bass lanes with beat-proportional blocks. Drag blocks to reorder the progression and the chord cards update to match.
 * **Draggable arranger** – Add section entries, set repeat counts per entry, and drag to reorder song playback order. Song mode follows arranger entries/repeats when present, and falls back to section order when arranger is empty.
 * **Section transitions** – Optional per-section crash cymbal at section start and roll at section end.
 * **Beat** – A kick/snare/hi-hat beat plays via the Web Audio API at the selected BPM. Adjust BPM with the +/− buttons or type directly.
-* **Persistence** – Songs are saved automatically to `localStorage`. Export/import includes sections/chords, chord lengths, chord+bass repeats, synth settings, per-instrument reverb, mixer levels, DAW ordering, crash/roll options, arranger order/repeats, playback mode, and sound selections.
+* **Song naming + recents** – A song title box is always visible, and an **Open most recent** dropdown lists recent songs with last-updated timestamps.
+* **Persistence** – Songs are saved automatically to browser storage and the most recently edited/opened song is restored on load. Export/import includes song metadata (title/id/timestamp), sections/chords, chord lengths, chord+bass repeats, synth settings, per-instrument reverb, mixer levels, DAW ordering, crash/roll options, arranger order/repeats, playback mode, and sound selections.
 
 ## Running locally
 

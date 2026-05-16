@@ -61,7 +61,13 @@
 
   <!-- ===== SONG TITLE ===== -->
   <div class="song-title-bar">
-    <input type="text" id="song-title" placeholder="Song title…" aria-label="Song title" />
+    <input type="text" id="song-title" placeholder="Untitled Song" aria-label="Song title" />
+    <label class="recent-song-field" for="recent-song-select">
+      <span>Open most recent</span>
+      <select id="recent-song-select" aria-label="Open most recent song">
+        <option value="">No recent songs saved yet</option>
+      </select>
+    </label>
   </div>
 
   <!-- ===== PLAYBACK HELP + SCRUB ===== -->
@@ -86,11 +92,11 @@
   <!-- ===== MIXER ===== -->
   <section id="mixer-panel" class="mixer-panel" aria-label="Mixer controls"></section>
 
-  <!-- ===== SONG ARRANGER ===== -->
-  <section id="arranger-panel" class="arranger-panel" aria-label="Song arranger"></section>
-
   <!-- ===== SYNTH CONTROLS ===== -->
   <section id="synth-rack" class="synth-rack" aria-label="Chord and bass synth controls"></section>
+
+  <!-- ===== SONG ARRANGER ===== -->
+  <section id="arranger-panel" class="arranger-panel" aria-label="Song arranger"></section>
 
   <!-- ===== SECTIONS ===== -->
   <main id="sections-container" aria-label="Song sections"></main>
@@ -146,7 +152,7 @@
           <dd>Each chord defaults to 4 beats (1 bar). Change Beats on each chord card to control progression length.</dd>
 
           <dt>🎛️ Chord/Bass sounds</dt>
-          <dd>Chord and bass now each have a compact 2-oscillator synth panel with presets, ADSR, filter cutoff, and resonance. Bass sits directly under the chord synth controls and can be enabled independently.</dd>
+          <dd>Chord and bass now each have a compact 2-oscillator synth panel with presets, ADSR, filter cutoff, and resonance. Each synth panel can be collapsed/expanded to keep the UI tidy.</dd>
 
           <dt>🎚️ Mixer + Reverb</dt>
           <dd>Use Mixer to balance chord/bass/output levels. Each synth has its own Reverb wet/dry slider, so chord and bass ambience can be shaped independently.</dd>
@@ -158,7 +164,7 @@
           <dd>Each section shows chord and bass arrangement lanes. Drag blocks to reorder the progression; the chord cards update to match. The currently playing block is highlighted during playback.</dd>
 
           <dt>🧭 Arranger</dt>
-          <dd>Add section entries, set repeat counts, and drag to reorder. Song mode follows arranger rows/repeats when present; otherwise it uses section order.</dd>
+          <dd>Add section entries, set repeat counts, and drag to reorder. The arranger is placed below synth controls. Song mode follows arranger rows/repeats when present; otherwise it uses section order.</dd>
 
           <dt>🪜 Octave-aware transpose</dt>
           <dd>Transpose can keep moving past a single octave. Note labels still show readable pitch classes, with an extra octave/semitone offset where useful.</dd>
@@ -167,7 +173,7 @@
           <dd>Each section has checkboxes for a crash cymbal at section start and a simple roll at section end.</dd>
 
           <dt>💾 Save / Export / Import</dt>
-          <dd>Save stores the song in your browser (localStorage). Export/import includes sections, beats, repeats, synths, reverb, mixer, arranger, and playback settings. 🆕 New clears everything.</dd>
+          <dd>Save stores songs in your browser and remembers the last opened song. Use Open most recent to load recent songs. Export/import includes song metadata, sections, beats, repeats, synths, reverb, mixer, arranger, and playback settings. 🆕 New clears everything.</dd>
         </dl>
       </div>
     </details>
