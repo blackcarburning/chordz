@@ -681,9 +681,12 @@ function updateSectionOptions(id, { crashOnStart, rollAtEnd }) {
 function selectEditSection(sectionId) {
   if (!song.sections.some(section => section.id === sectionId)) return;
   song.selectedSectionId = sectionId;
+  const selectedSection = song.sections.find(s => s.id === sectionId);
+  if (selectedSection?.drumPatternId) editingDrumPatternId = selectedSection.drumPatternId;
   commitSong();
   updatePlaybackModeUI();
   updatePlaybackHighlights();
+  renderDrumSequencer();
   if (isBeating && song.playbackMode === 'edit') initializePlaybackCursor();
 }
 
@@ -929,6 +932,13 @@ function updateDrumPatternName(patternId, name) {
 function selectEditDrumPattern(patternId) {
   if (!song.drumPatterns?.some(p => p.id === patternId)) return;
   editingDrumPatternId = patternId;
+  const activeSection = song.sections.find(s => s.id === song.selectedSectionId);
+  if (activeSection) {
+    activeSection.drumPatternId = patternId;
+    const sectionDrumSelect = document.querySelector(`.section[data-id="${activeSection.id}"] .section-drum-pattern-select`);
+    if (sectionDrumSelect) sectionDrumSelect.value = patternId;
+    commitSong();
+  }
   renderDrumSequencer();
 }
 
@@ -937,6 +947,10 @@ function updateSectionDrumPattern(sectionId, patternId) {
   if (!section) return;
   if (!song.drumPatterns?.some(p => p.id === patternId)) return;
   section.drumPatternId = patternId;
+  if (sectionId === song.selectedSectionId) {
+    editingDrumPatternId = patternId;
+    renderDrumSequencer();
+  }
   commitSong();
 }
 
@@ -1850,9 +1864,10 @@ function renderDrumSequencer() {
   const patterns = song.drumPatterns || [];
   if (!patterns.length) return;
 
-  // Ensure editingDrumPatternId is valid
+  // Ensure editingDrumPatternId is valid; prefer the selected section's pattern
   if (!editingDrumPatternId || !patterns.some(p => p.id === editingDrumPatternId)) {
-    editingDrumPatternId = patterns[0].id;
+    const selectedSection = song.sections.find(s => s.id === song.selectedSectionId);
+    editingDrumPatternId = selectedSection?.drumPatternId || patterns[0].id;
   }
   const pattern = patterns.find(p => p.id === editingDrumPatternId);
 
