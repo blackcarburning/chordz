@@ -5,7 +5,7 @@ A browser-based, dependency-free web app for building chord progressions and son
 ## What it does
 
 * **Song sections** – Create and arrange Verse / Chorus / Bridge / Middle 8 / Change / Outro / Custom sections, each with its own chord progression and scale.
-* **Chord editor** – Each chord card shows the root note and chord quality. Arrow buttons (▲▼) step the root note, cycle the chord type, or transpose the chord.
+* **Chord + bass pitch editor** – Each chord card shows chord root/quality plus bass root. Root and bass arrows step through notes in the selected section scale (octave-aware), while Xpose still transposes by semitone.
 * **Full chord palette** – maj, min, 5, 6, m6, 7, maj7, m7, mMaj7, dim, dim7, m7b5, aug, sus2, sus4, add9, 9, m9, maj9, 11, 13.
 * **Chord audition** – Click ♫ on any chord card to hear it through a small Web Audio 2-oscillator synth.
 * **Scales** – Each section has a configurable scale root and type (Major, Natural Minor, Harmonic Minor, Melodic Minor, Major Pentatonic, Minor Pentatonic, Blues, Dorian, Phrygian, Lydian, Mixolydian, Aeolian, Locrian, Chromatic). The notes in the chosen scale are shown inline.
@@ -14,7 +14,8 @@ A browser-based, dependency-free web app for building chord progressions and son
 * **Go to / scrub head** – In Song mode, jump to any beat position with the timeline slider. Current section/chord/beat is shown live, including arranger slot/repeat context when arranger entries are used.
 * **Chord lengths** – Every chord defaults to `4` beats (1 bar) and can be changed to any beat length.
 * **Per-segment repeats (chord + bass)** – Each chord segment has `Chord x` and `Bass x` repeat selectors (`1`, `2`, `4`) so you can subdivide the same segment into repeated hits independently for chord and bass.
-* **2-oscillator chord + bass synths** – Separate chord and bass synth panels with presets, ADSR, filter cutoff, resonance, oscillator mix/detune defaults, and bass enable/disable.
+* **2-oscillator chord + bass synths** – Separate chord and bass synth panels with presets, Osc 1/Osc 2 waveform selection, ADSR, filter cutoff/resonance, harmonic drive (distortion), simple modulation (rate/depth vibrato), oscillator mix/detune defaults, and bass enable/disable.
+* **Linked / Free bass pitch mode** – Bass synth panel includes a global pitch mode switch: `linked` keeps bass following chord roots; `free` enables independent per-chord bass pitch controls.
 * **Collapsible synth controls** – Chord and bass synth panels can be collapsed/expanded to keep the interface tidy without losing settings.
 * **Per-instrument reverb wet/dry** – Chord and bass synth cards each include a dedicated reverb wet control so ambience can be shaped independently.
 * **Mixer section** – Dedicated mixer controls for chord level, bass level, **drum level**, and overall output level. The Drums slider affects all drum sequencer sounds including crash and roll.
@@ -32,11 +33,11 @@ Replaces the old preset beat with a fully editable pattern-based drum sequencer:
 * **Contained layout** – The sequencer is rendered in its own panel above the synth controls, with horizontal scrolling kept inside the grid area so the page layout stays stable.
 
 * **UI order** – The drum sequencer panel appears above the synth controls for quick access during composition.
-* **DAW-style arrangement lanes** – Each section shows chord and bass lanes with beat-proportional blocks. Drag blocks to reorder the progression and the chord cards update to match.
+* **DAW-style arrangement lanes** – Each section shows chord and bass lanes with beat-proportional blocks and readable minimum widths in a contained horizontal scroll area. Drag blocks to reorder the progression and the chord cards update to match.
 * **Draggable arranger** – Add section entries, set repeat counts per entry, and drag to reorder song playback order. Song mode follows arranger entries/repeats when present, and falls back to section order when arranger is empty.
 * **Section transitions** – Optional per-section crash cymbal at section start and roll at section end.
 * **Song naming + recents** – A song title box is always visible, and an **Open most recent** dropdown lists recent songs with last-updated timestamps.
-* **Persistence** – Songs are saved automatically to browser storage and the most recently edited/opened song is restored on load. Drum patterns (grids, names, and per-section assignments) are fully persisted in browser storage. Export/import includes song metadata, sections/chords, drum patterns, per-section drum pattern assignments, drummer volume, chord lengths, chord+bass repeats, synth settings, per-instrument reverb, mixer levels, DAW ordering, crash/roll options, arranger order/repeats, playback mode, and sound selections. Older JSON files without drum patterns load successfully — default patterns are added automatically.
+* **Persistence** – Songs are saved automatically to browser storage and the most recently edited/opened song is restored on load. Drum patterns (grids, names, and per-section assignments) are fully persisted in browser storage. Export/import includes song metadata, sections/chords (including bass pitch roots), bass linked/free mode, drum patterns, per-section drum pattern assignments, drummer volume, chord lengths, chord+bass repeats, synth settings (waveforms, distortion, modulation), per-instrument reverb, mixer levels, DAW ordering, crash/roll options, arranger order/repeats, playback mode, and sound selections. Older JSON files load successfully with safe defaults for newer fields.
 
 ## Running locally
 
