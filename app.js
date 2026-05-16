@@ -58,7 +58,9 @@ const SECTION_TYPES = ['Verse', 'Chorus', 'Bridge', 'Middle 8', 'Change', 'Outro
 const PLAYBACK_MODES = ['edit', 'song'];
 const BASS_PITCH_MODES = ['linked', 'free'];
 const NOTE_REPEAT_OPTIONS = [1, 2, 4];
+const START_BEAT_OPTIONS = [1, 2, 3, 4];
 const RECENT_SONG_LIMIT = 8;
+const DEFAULT_CHORD_ROOT = -12;
 
 const DRUM_PATTERN_COUNT = 10;
 const DRUM_LANES = [
@@ -384,15 +386,7 @@ function createSection(type) {
     crashOnStart: false,
     rollAtEnd: false,
     drumPatternId: null,
-    chords: defaults.map(chord => ({
-      id: makeId(),
-      root: chord.root,
-      bassRoot: chord.root,
-      type: chord.type,
-      beats: 4,
-      chordRepeat: 1,
-      bassRepeat: 1,
-    })),
+    chords: defaults.map(chord => createChord(chord.root - 12, chord.type)),
   };
 }
 
@@ -434,6 +428,24 @@ function createDefaultSong() {
 function normalizeRepeat(value, fallback = 1) {
   const repeat = clampInt(value, fallback, 1, 4);
   return NOTE_REPEAT_OPTIONS.includes(repeat) ? repeat : fallback;
+}
+
+function normalizeStartBeat(value, fallback = 1) {
+  return clampInt(value, fallback, 1, 4);
+}
+
+function createChord(root = DEFAULT_CHORD_ROOT, type = 'maj') {
+  const normalizedRoot = normalizeSemitone(root, DEFAULT_CHORD_ROOT);
+  return {
+    id: makeId(),
+    root: normalizedRoot,
+    bassRoot: normalizedRoot,
+    type: CHORD_TYPES.some(entry => entry.name === type) ? type : 'maj',
+    beats: 4,
+    chordRepeat: 1,
+    bassRepeat: 1,
+    startBeat: 1,
+  };
 }
 
 function emptyDrumGrid() {
@@ -498,6 +510,7 @@ function normalizeChord(rawChord) {
     beats: clampInt(chord.beats, 4, 1, 64),
     chordRepeat: normalizeRepeat(chord.chordRepeat, 1),
     bassRepeat: normalizeRepeat(chord.bassRepeat, 1),
+    startBeat: normalizeStartBeat(chord.startBeat, 1),
   };
 }
 
@@ -646,6 +659,11 @@ function stepPitchBySectionScale(section, currentSemitone, direction) {
 function getChordBassRoot(chord) {
   if ((song.bassPitchMode || 'linked') !== 'free') return chord.root;
   return normalizeSemitone(chord.bassRoot, chord.root);
+}
+
+function getChordPlaybackStartBeat(chord, beats = chord?.beats || 4) {
+  const totalBeats = clampInt(beats, 4, 1, 64);
+  return Math.min(totalBeats, normalizeStartBeat(chord?.startBeat, 1));
 }
 
 function chordTypeObj(typeName) {
@@ -811,7 +829,7 @@ function updateSynthWaveform(kind, fieldKey, value) {
 function addChord(sectionId) {
   const section = song.sections.find(entry => entry.id === sectionId);
   if (!section) return;
-  section.chords.push({ id: makeId(), root: 0, bassRoot: 0, type: 'maj', beats: 4, chordRepeat: 1, bassRepeat: 1 });
+  section.chords.push(createChord());
   commitSong({ rerender: true, refreshCursor: true });
 }
 
@@ -872,6 +890,12 @@ function updateChordRepeat(sectionId, chordId, repeat) {
 function updateBassRepeat(sectionId, chordId, repeat) {
   mutateChord(sectionId, chordId, chord => {
     chord.bassRepeat = normalizeRepeat(repeat, chord.bassRepeat || 1);
+  }, { refreshCursor: true });
+}
+
+function updateChordStartBeat(sectionId, chordId, startBeat) {
+  mutateChord(sectionId, chordId, chord => {
+    chord.startBeat = normalizeStartBeat(startBeat, chord.startBeat || 1);
   }, { refreshCursor: true });
 }
 
@@ -1696,14 +1720,18 @@ function playSynthVoice(freq, time, duration, synthSettings, kind = 'chord') {
   osc2.stop(noteEnd + 0.02);
 }
 
-function playChordNotes(rootSemitone, typeName, when, beats = 4, repeats = 1) {
+function playChordNotes(rootSemitone, typeName, when, beats = 4, repeats = 1, startBeat = 1) {
   const chordType = chordTypeObj(typeName);
   const rootMidi = 60 + rootSemitone;
+  const totalBeats = clampInt(beats, 4, 1, 64);
   const repeatCount = normalizeRepeat(repeats, 1);
-  const hitBeats = Math.max(0.25, beats / repeatCount);
+  const effectiveStartBeat = Math.min(totalBeats, normalizeStartBeat(startBeat, 1));
+  const startOffsetBeats = effectiveStartBeat - 1;
+  const activeBeats = Math.max(0.25, totalBeats - startOffsetBeats);
+  const hitBeats = Math.max(0.25, activeBeats / repeatCount);
   const hitDuration = Math.max(0.1, beatsToSeconds(hitBeats) * 0.92);
   for (let hit = 0; hit < repeatCount; hit++) {
-    const hitTime = when + beatsToSeconds(hit * hitBeats);
+    const hitTime = when + beatsToSeconds(startOffsetBeats + hit * hitBeats);
     chordType.intervals.forEach(interval => {
       playSynthVoice(
         frequencyFromMidi(rootMidi + interval),
@@ -1716,13 +1744,17 @@ function playChordNotes(rootSemitone, typeName, when, beats = 4, repeats = 1) {
   }
 }
 
-function playBassNote(rootSemitone, when, beats = 4, repeats = 1) {
+function playBassNote(rootSemitone, when, beats = 4, repeats = 1, startBeat = 1) {
   const bassMidi = 36 + rootSemitone;
+  const totalBeats = clampInt(beats, 4, 1, 64);
   const repeatCount = normalizeRepeat(repeats, 1);
-  const hitBeats = Math.max(0.25, beats / repeatCount);
+  const effectiveStartBeat = Math.min(totalBeats, normalizeStartBeat(startBeat, 1));
+  const startOffsetBeats = effectiveStartBeat - 1;
+  const activeBeats = Math.max(0.25, totalBeats - startOffsetBeats);
+  const hitBeats = Math.max(0.25, activeBeats / repeatCount);
   const hitDuration = Math.max(0.09, beatsToSeconds(hitBeats) * 0.9);
   for (let hit = 0; hit < repeatCount; hit++) {
-    const hitTime = when + beatsToSeconds(hit * hitBeats);
+    const hitTime = when + beatsToSeconds(startOffsetBeats + hit * hitBeats);
     playSynthVoice(frequencyFromMidi(bassMidi), hitTime, hitDuration, song.bassSynth, 'bass');
   }
 }
@@ -1933,8 +1965,9 @@ function scheduleMusicalBeat(time) {
 
   if (playbackCursor.beatInSection === 0 && section.crashOnStart) playCrash(time);
   if (playbackCursor.beatInChord === 0) {
-    playChordNotes(chord.root, chord.type, time, chord.beats || 4, chord.chordRepeat || 1);
-    if (song.bassEnabled) playBassNote(getChordBassRoot(chord), time, chord.beats || 4, chord.bassRepeat || 1);
+    const chordStartBeat = getChordPlaybackStartBeat(chord);
+    playChordNotes(chord.root, chord.type, time, chord.beats || 4, chord.chordRepeat || 1, chordStartBeat);
+    if (song.bassEnabled) playBassNote(getChordBassRoot(chord), time, chord.beats || 4, chord.bassRepeat || 1, chordStartBeat);
   }
 
   const sectionBeats = getSectionBeatLength(section);
@@ -2588,6 +2621,7 @@ function updateChordCard(sectionId, chordId) {
   const bassOffsetElement = document.getElementById('bass-offset-' + chordId);
   const qualityElement = document.getElementById('qual-' + chordId);
   const beatsElement = document.getElementById('beats-' + chordId);
+  const startBeatElement = document.getElementById('start-beat-' + chordId);
   const chordRepeatElement = document.getElementById('chord-repeat-' + chordId);
   const bassRepeatElement = document.getElementById('bass-repeat-' + chordId);
   if (rootElement) rootElement.textContent = noteName(chord.root);
@@ -2606,6 +2640,7 @@ function updateChordCard(sectionId, chordId) {
     qualityElement.title = chordTypeObj(chord.type).label;
   }
   if (beatsElement) beatsElement.value = chord.beats || 4;
+  if (startBeatElement) startBeatElement.value = String(normalizeStartBeat(chord.startBeat, 1));
   if (chordRepeatElement) chordRepeatElement.value = String(chord.chordRepeat || 1);
   if (bassRepeatElement) bassRepeatElement.value = String(chord.bassRepeat || 1);
 }
@@ -2978,6 +3013,25 @@ function buildChordCard(chord, sectionId) {
   beatsInput.addEventListener('input', () => updateChordBeats(sectionId, chord.id, beatsInput.value));
   beatsRow.append(beatsLabel, beatsInput);
 
+  const startBeatRow = document.createElement('div');
+  startBeatRow.className = 'beats-row';
+  const startBeatLabel = document.createElement('label');
+  startBeatLabel.textContent = 'Start';
+  startBeatLabel.setAttribute('for', 'start-beat-' + chord.id);
+  const startBeatSelect = document.createElement('select');
+  startBeatSelect.id = 'start-beat-' + chord.id;
+  startBeatSelect.className = 'repeat-select';
+  startBeatSelect.setAttribute('aria-label', 'Chord start beat');
+  START_BEAT_OPTIONS.forEach(value => {
+    const option = document.createElement('option');
+    option.value = String(value);
+    option.textContent = `${value}${value === 1 ? 'st' : value === 2 ? 'nd' : value === 3 ? 'rd' : 'th'} beat`;
+    if (value === normalizeStartBeat(chord.startBeat, 1)) option.selected = true;
+    startBeatSelect.appendChild(option);
+  });
+  startBeatSelect.addEventListener('change', () => updateChordStartBeat(sectionId, chord.id, startBeatSelect.value));
+  startBeatRow.append(startBeatLabel, startBeatSelect);
+
   const repeatRow = document.createElement('div');
   repeatRow.className = 'repeat-row';
 
@@ -3039,7 +3093,7 @@ function buildChordCard(chord, sectionId) {
   removeButton.addEventListener('click', () => removeChord(sectionId, chord.id));
 
   actionBar.append(auditionButton, removeButton);
-  card.append(rootElement, offsetElement, bassRootElement, bassOffsetElement, qualityElement, divider1, noteRow, bassRow, typeRow, transposeRow, divider2, beatsRow, repeatRow, actionBar);
+  card.append(rootElement, offsetElement, bassRootElement, bassOffsetElement, qualityElement, divider1, noteRow, bassRow, typeRow, transposeRow, divider2, beatsRow, startBeatRow, repeatRow, actionBar);
   return card;
 }
 
