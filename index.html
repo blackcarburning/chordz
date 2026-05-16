@@ -71,7 +71,8 @@
       Chord <strong>Beats</strong> set how long each chord lasts.
     </p>
     <p class="playback-help" id="playback-help-song">
-      <strong>Song mode:</strong> the full song plays section-by-section once, then stops. Use <strong>Go to</strong> to jump.
+      <strong>Song mode:</strong> playback follows the arranger order (if entries exist), including arranger repeats, then stops.
+      If arranger is empty, Song mode plays sections top-to-bottom. Use <strong>Go to</strong> to jump.
       Crash/roll section options trigger at section start/end.
     </p>
     <div class="go-to-row">
@@ -81,6 +82,12 @@
     </div>
     <div class="playback-position" id="playback-position">Position: —</div>
   </div>
+
+  <!-- ===== MIXER ===== -->
+  <section id="mixer-panel" class="mixer-panel" aria-label="Mixer controls"></section>
+
+  <!-- ===== SONG ARRANGER ===== -->
+  <section id="arranger-panel" class="arranger-panel" aria-label="Song arranger"></section>
 
   <!-- ===== SYNTH CONTROLS ===== -->
   <section id="synth-rack" class="synth-rack" aria-label="Chord and bass synth controls"></section>
@@ -141,8 +148,17 @@
           <dt>🎛️ Chord/Bass sounds</dt>
           <dd>Chord and bass now each have a compact 2-oscillator synth panel with presets, ADSR, filter cutoff, and resonance. Bass sits directly under the chord synth controls and can be enabled independently.</dd>
 
+          <dt>🎚️ Mixer + Reverb</dt>
+          <dd>Use Mixer to balance chord/bass/output levels. Each synth has its own Reverb wet/dry slider, so chord and bass ambience can be shaped independently.</dd>
+
+          <dt>🔁 Note repeats</dt>
+          <dd>Each chord card has Chord x and Bass x selectors (1/2/4). Repeats split the same segment into repeated hits over that segment length.</dd>
+
           <dt>🧱 DAW lanes</dt>
           <dd>Each section shows chord and bass arrangement lanes. Drag blocks to reorder the progression; the chord cards update to match. The currently playing block is highlighted during playback.</dd>
+
+          <dt>🧭 Arranger</dt>
+          <dd>Add section entries, set repeat counts, and drag to reorder. Song mode follows arranger rows/repeats when present; otherwise it uses section order.</dd>
 
           <dt>🪜 Octave-aware transpose</dt>
           <dd>Transpose can keep moving past a single octave. Note labels still show readable pitch classes, with an extra octave/semitone offset where useful.</dd>
@@ -151,7 +167,7 @@
           <dd>Each section has checkboxes for a crash cymbal at section start and a simple roll at section end.</dd>
 
           <dt>💾 Save / Export / Import</dt>
-          <dd>Save stores the song in your browser (localStorage). Export downloads a <code>.json</code> file. Import loads a saved file. 🆕 New clears everything.</dd>
+          <dd>Save stores the song in your browser (localStorage). Export/import includes sections, beats, repeats, synths, reverb, mixer, arranger, and playback settings. 🆕 New clears everything.</dd>
         </dl>
       </div>
     </details>
