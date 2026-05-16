@@ -57,6 +57,7 @@ const SCALES = [
 const SECTION_TYPES = ['Verse', 'Chorus', 'Bridge', 'Middle 8', 'Change', 'Outro', 'Custom'];
 const PLAYBACK_MODES = ['edit', 'song'];
 const NOTE_REPEAT_OPTIONS = [1, 2, 4];
+const RECENT_SONG_LIMIT = 8;
 
 const SYNTH_PRESET_LIBRARY = {
   chord: {
@@ -327,9 +328,12 @@ function createSection(type) {
 }
 
 function createDefaultSong() {
+  const now = Date.now();
   const sections = [createSection('Verse'), createSection('Chorus'), createSection('Bridge')];
   return {
+    id: makeId(),
     title: 'Untitled Song',
+    updatedAt: now,
     bpm: 100,
     playbackMode: 'edit',
     selectedSectionId: sections[0]?.id || null,
@@ -363,6 +367,7 @@ function normalizeRepeat(value, fallback = 1) {
 
 let song = createDefaultSong();
 let songVersion = 0;
+const synthPanelExpanded = { chord: true, bass: true };
 
 function normalizeChord(rawChord) {
   const chord = rawChord || {};
@@ -411,7 +416,9 @@ function normalizeSong(rawSong) {
     : base.arranger;
 
   return {
-    title: typeof parsed.title === 'string' ? parsed.title : base.title,
+    id: typeof parsed.id === 'string' && parsed.id.trim() ? parsed.id : makeId(),
+    title: typeof parsed.title === 'string' && parsed.title.trim() ? parsed.title.trim() : base.title,
+    updatedAt: Number.isFinite(Number(parsed.updatedAt)) ? Number(parsed.updatedAt) : Date.now(),
     bpm: clampInt(parsed.bpm, base.bpm, 40, 300),
     playbackMode: PLAYBACK_MODES.includes(parsed.playbackMode) ? parsed.playbackMode : base.playbackMode,
     selectedSectionId: selectedSectionExists ? parsed.selectedSectionId : sections[0].id,
@@ -585,6 +592,12 @@ function setSynthPreset(kind, presetId) {
 function setBassEnabled(enabled) {
   song.bassEnabled = Boolean(enabled);
   commitSong();
+}
+
+function setSynthPanelExpanded(kind, expanded) {
+  if (kind !== 'chord' && kind !== 'bass') return;
+  synthPanelExpanded[kind] = Boolean(expanded);
+  renderSynthRack();
 }
 
 function updateSynthField(kind, fieldKey, value) {
@@ -776,24 +789,144 @@ function moveArrangerEntry(draggedEntryId, targetEntryId, placeAfter = false) {
 // =====================================================================
 
 const STORAGE_KEY = 'chordz_song_v1';
+const SONG_LIBRARY_KEY = 'chordz_song_library_v1';
+
+function normalizeSongTitle(rawTitle) {
+  if (typeof rawTitle !== 'string') return 'Untitled Song';
+  const trimmed = rawTitle.trim();
+  return trimmed || 'Untitled Song';
+}
+
+function formatRecentSongTime(timestamp) {
+  const date = new Date(Number(timestamp) || Date.now());
+  return date.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function loadSongLibrary() {
+  try {
+    const raw = localStorage.getItem(SONG_LIBRARY_KEY);
+    if (!raw) return { lastSongId: null, songs: [] };
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.songs)) return { lastSongId: null, songs: [] };
+    const songs = parsed.songs
+      .map(entry => {
+        const normalized = normalizeSong(entry?.data || entry?.song || null);
+        return {
+          id: normalized.id,
+          title: normalizeSongTitle(entry?.title || normalized.title),
+          updatedAt: Number.isFinite(Number(entry?.updatedAt)) ? Number(entry.updatedAt) : Date.now(),
+          data: normalized,
+        };
+      })
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, RECENT_SONG_LIMIT);
+    const lastSongId = typeof parsed.lastSongId === 'string' ? parsed.lastSongId : songs[0]?.id || null;
+    return { lastSongId, songs };
+  } catch (_) {
+    return { lastSongId: null, songs: [] };
+  }
+}
+
+function saveSongLibrary(library) {
+  localStorage.setItem(SONG_LIBRARY_KEY, JSON.stringify({
+    lastSongId: library.lastSongId || null,
+    songs: (library.songs || []).slice(0, RECENT_SONG_LIMIT),
+  }));
+}
+
+function saveSongToLibrary(songData) {
+  const library = loadSongLibrary();
+  const normalized = normalizeSong(songData);
+  normalized.title = normalizeSongTitle(normalized.title);
+  normalized.updatedAt = Date.now();
+  const existingIndex = library.songs.findIndex(entry => entry.id === normalized.id);
+  const record = {
+    id: normalized.id,
+    title: normalized.title,
+    updatedAt: normalized.updatedAt,
+    data: normalized,
+  };
+  if (existingIndex >= 0) library.songs.splice(existingIndex, 1);
+  library.songs.unshift(record);
+  library.songs = library.songs
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, RECENT_SONG_LIMIT);
+  library.lastSongId = normalized.id;
+  saveSongLibrary(library);
+}
+
+function renderRecentSongsDropdown() {
+  const select = document.getElementById('recent-song-select');
+  if (!select) return;
+  const library = loadSongLibrary();
+  select.innerHTML = '';
+  if (!library.songs.length) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'No recent songs saved yet';
+    select.appendChild(option);
+    select.value = '';
+    return;
+  }
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = 'Open most recent…';
+  select.appendChild(placeholder);
+  library.songs.forEach(entry => {
+    const option = document.createElement('option');
+    option.value = entry.id;
+    option.textContent = `${normalizeSongTitle(entry.title)} — ${formatRecentSongTime(entry.updatedAt)}`;
+    select.appendChild(option);
+  });
+  if (song.id && library.songs.some(entry => entry.id === song.id)) select.value = song.id;
+  else select.value = '';
+}
+
+function openRecentSong(songId) {
+  if (!songId) return;
+  const library = loadSongLibrary();
+  const entry = library.songs.find(item => item.id === songId);
+  if (!entry?.data) return;
+  song = normalizeSong(entry.data);
+  render();
+  saveSong();
+}
 
 function saveSong() {
   const titleElement = document.getElementById('song-title');
-  if (titleElement) song.title = titleElement.value || song.title;
+  song.title = normalizeSongTitle(titleElement ? titleElement.value : song.title);
+  song.updatedAt = Date.now();
+  if (titleElement && document.activeElement !== titleElement) titleElement.value = song.title;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(song));
+    saveSongToLibrary(song);
+    renderRecentSongsDropdown();
   } catch (_) {
     /* quota exceeded – silently ignore */
   }
 }
 
 function loadSong() {
+  const library = loadSongLibrary();
+  const preferredId = library.lastSongId || library.songs[0]?.id || null;
+  const preferred = preferredId ? library.songs.find(entry => entry.id === preferredId) : library.songs[0];
+  if (preferred?.data) {
+    song = normalizeSong(preferred.data);
+    return true;
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return false;
     const parsed = JSON.parse(raw);
     if (parsed && Array.isArray(parsed.sections)) {
       song = normalizeSong(parsed);
+      saveSongToLibrary(song);
       return true;
     }
   } catch (_) {
@@ -806,6 +939,7 @@ function resetSong() {
   if (!confirm('Clear the current song and start fresh?')) return;
   localStorage.removeItem(STORAGE_KEY);
   song = normalizeSong(createDefaultSong());
+  saveSong();
   render();
 }
 
@@ -836,8 +970,8 @@ function importJSON() {
         const parsed = JSON.parse(loadEvent.target.result);
         if (!parsed || !Array.isArray(parsed.sections)) throw new Error('Invalid song file.');
         song = normalizeSong(parsed);
-        saveSong();
         render();
+        saveSong();
       } catch (error) {
         alert('Import failed: ' + error.message);
       }
@@ -1451,9 +1585,10 @@ function render() {
   const modeElement = document.getElementById('playback-mode-select');
   if (modeElement) modeElement.value = song.playbackMode || 'edit';
 
+  renderRecentSongsDropdown();
   renderMixerPanel();
-  renderArrangerPanel();
   renderSynthRack();
+  renderArrangerPanel();
 
   const container = document.getElementById('sections-container');
   if (!container) return;
@@ -1648,9 +1783,11 @@ function renderSynthRack() {
 function buildSynthCard(kind) {
   const synth = kind === 'bass' ? song.bassSynth : song.chordSynth;
   const presetOptions = kind === 'bass' ? BASS_SOUND_PRESETS : CHORD_SOUND_PRESETS;
+  const expanded = synthPanelExpanded[kind] !== false;
 
   const card = document.createElement('section');
   card.className = `synth-card synth-card-${kind}`;
+  if (!expanded) card.classList.add('collapsed');
 
   const header = document.createElement('div');
   header.className = 'synth-card-header';
@@ -1666,6 +1803,14 @@ function buildSynthCard(kind) {
 
   const controls = document.createElement('div');
   controls.className = 'synth-header-controls';
+
+  const collapseButton = document.createElement('button');
+  collapseButton.type = 'button';
+  collapseButton.className = 'action-btn synth-collapse-btn';
+  collapseButton.setAttribute('aria-expanded', String(expanded));
+  collapseButton.textContent = expanded ? '▾ Hide controls' : '▸ Show controls';
+  collapseButton.addEventListener('click', () => setSynthPanelExpanded(kind, !expanded));
+  controls.appendChild(collapseButton);
 
   const presetLabel = document.createElement('label');
   presetLabel.className = 'synth-select-row';
@@ -1698,21 +1843,24 @@ function buildSynthCard(kind) {
 
   header.append(titleWrap, controls);
 
-  const detailGrid = document.createElement('div');
-  detailGrid.className = 'synth-detail-grid';
-  detailGrid.append(
-    buildSynthMetaChip('Osc 1', synth.osc1Type),
-    buildSynthMetaChip('Osc 2', synth.osc2Type),
-    buildSynthMetaChip('Mix', `${Math.round(synth.mix * 100)}%`),
-    buildSynthMetaChip('Detune', `${synth.detune > 0 ? '+' : ''}${Math.round(synth.detune)}¢`),
-  );
+  card.append(header);
+  if (expanded) {
+    const detailGrid = document.createElement('div');
+    detailGrid.className = 'synth-detail-grid';
+    detailGrid.append(
+      buildSynthMetaChip('Osc 1', synth.osc1Type),
+      buildSynthMetaChip('Osc 2', synth.osc2Type),
+      buildSynthMetaChip('Mix', `${Math.round(synth.mix * 100)}%`),
+      buildSynthMetaChip('Detune', `${synth.detune > 0 ? '+' : ''}${Math.round(synth.detune)}¢`),
+    );
 
-  const controlsGrid = document.createElement('div');
-  controlsGrid.className = 'synth-controls-grid';
-  SYNTH_UI_FIELDS.forEach(field => controlsGrid.appendChild(buildSynthSlider(kind, synth, field)));
-  controlsGrid.appendChild(buildReverbSlider(kind));
+    const controlsGrid = document.createElement('div');
+    controlsGrid.className = 'synth-controls-grid';
+    SYNTH_UI_FIELDS.forEach(field => controlsGrid.appendChild(buildSynthSlider(kind, synth, field)));
+    controlsGrid.appendChild(buildReverbSlider(kind));
 
-  card.append(header, detailGrid, controlsGrid);
+    card.append(detailGrid, controlsGrid);
+  }
   return card;
 }
 
@@ -2287,6 +2435,12 @@ document.addEventListener('DOMContentLoaded', () => {
   render();
 
   document.getElementById('song-title').addEventListener('input', saveSong);
+  document.getElementById('song-title').addEventListener('blur', () => {
+    const titleElement = document.getElementById('song-title');
+    if (titleElement) titleElement.value = normalizeSongTitle(titleElement.value);
+    saveSong();
+  });
+  document.getElementById('recent-song-select').addEventListener('change', event => openRecentSong(event.target.value));
 
   const bpmInput = document.getElementById('bpm-input');
   bpmInput.addEventListener('change', event => updateBpm(event.target.value));
