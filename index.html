@@ -41,18 +41,6 @@
         </select>
       </div>
 
-      <!-- Sound controls -->
-      <div class="ctrl-group" title="Sound controls">
-        <label class="ctrl-label" for="chord-sound-select">Chord</label>
-        <select id="chord-sound-select" aria-label="Chord sound"></select>
-        <label class="ctrl-label" for="bass-sound-select">Bass</label>
-        <select id="bass-sound-select" aria-label="Bass sound"></select>
-        <label class="checkbox-inline">
-          <input type="checkbox" id="bass-enabled" />
-          Bass
-        </label>
-      </div>
-
       <!-- Global transpose -->
       <div class="ctrl-group" title="Transpose whole song by semitone">
         <span class="ctrl-label">Transpose</span>
@@ -93,6 +81,9 @@
     </div>
     <div class="playback-position" id="playback-position">Position: —</div>
   </div>
+
+  <!-- ===== SYNTH CONTROLS ===== -->
+  <section id="synth-rack" class="synth-rack" aria-label="Chord and bass synth controls"></section>
 
   <!-- ===== SECTIONS ===== -->
   <main id="sections-container" aria-label="Song sections"></main>
@@ -148,7 +139,13 @@
           <dd>Each chord defaults to 4 beats (1 bar). Change Beats on each chord card to control progression length.</dd>
 
           <dt>🎛️ Chord/Bass sounds</dt>
-          <dd>Select separate sound presets for chord playback and bass. Bass can be enabled/disabled independently.</dd>
+          <dd>Chord and bass now each have a compact 2-oscillator synth panel with presets, ADSR, filter cutoff, and resonance. Bass sits directly under the chord synth controls and can be enabled independently.</dd>
+
+          <dt>🧱 DAW lanes</dt>
+          <dd>Each section shows chord and bass arrangement lanes. Drag blocks to reorder the progression; the chord cards update to match. The currently playing block is highlighted during playback.</dd>
+
+          <dt>🪜 Octave-aware transpose</dt>
+          <dd>Transpose can keep moving past a single octave. Note labels still show readable pitch classes, with an extra octave/semitone offset where useful.</dd>
 
           <dt>🥁 Section Crash / Roll</dt>
           <dd>Each section has checkboxes for a crash cymbal at section start and a simple roll at section end.</dd>
