@@ -1704,10 +1704,10 @@ function playChordNotes(rootSemitone, typeName, when, beats = 4, repeats = 1) {
   const hitDuration = Math.max(0.1, beatsToSeconds(hitBeats) * 0.92);
   for (let hit = 0; hit < repeatCount; hit++) {
     const hitTime = when + beatsToSeconds(hit * hitBeats);
-    chordType.intervals.forEach((interval, index) => {
+    chordType.intervals.forEach(interval => {
       playSynthVoice(
         frequencyFromMidi(rootMidi + interval),
-        hitTime + index * 0.01,
+        hitTime,
         hitDuration,
         song.chordSynth,
         'chord',
@@ -2876,8 +2876,20 @@ function buildArrangementBlock(section, chord, laneType, index) {
     const placeAfter = event.clientX > rect.left + rect.width / 2;
     moveChordWithinSection(section.id, draggedChordId, chord.id, placeAfter);
   });
+  block.addEventListener('click', () => focusNoteEditorForChord(section.id, chord.id, laneType === 'bass' ? 'bass' : 'chord'));
 
   return block;
+}
+
+function focusNoteEditorForChord(sectionId, chordId, kind) {
+  if (song.selectedSectionId !== sectionId) selectEditSection(sectionId);
+  const card = document.getElementById('chord-card-' + chordId);
+  if (!card) return;
+  const selector = kind === 'bass'
+    ? '.ctrl-row[data-note-editor-kind="bass"] .arrow-btn:not(:disabled)'
+    : '.ctrl-row[data-note-editor-kind="chord"] .arrow-btn:not(:disabled)';
+  const target = card.querySelector(selector) || document.getElementById(kind === 'bass' ? 'bass-preset-select' : 'chord-preset-select');
+  if (target && typeof target.focus === 'function') target.focus();
 }
 
 function buildChordsArea(section) {
@@ -2930,6 +2942,8 @@ function buildChordCard(chord, sectionId) {
   divider1.className = 'chord-divider';
 
   const noteRow = buildCtrlRow('Note', () => noteUp(sectionId, chord.id), () => noteDown(sectionId, chord.id), 'Root note up (scale step)', 'Root note down (scale step)');
+  noteRow.dataset.noteEditorKind = 'chord';
+  noteRow.addEventListener('click', () => focusNoteEditorForChord(sectionId, chord.id, 'chord'));
   const bassRow = buildCtrlRow(
     'Bass',
     () => bassPitchUp(sectionId, chord.id),
@@ -2938,6 +2952,8 @@ function buildChordCard(chord, sectionId) {
     'Bass note down',
     { disabled: (song.bassPitchMode || 'linked') !== 'free' },
   );
+  bassRow.dataset.noteEditorKind = 'bass';
+  bassRow.addEventListener('click', () => focusNoteEditorForChord(sectionId, chord.id, 'bass'));
   const typeRow = buildCtrlRow('Type', () => varUp(sectionId, chord.id), () => varDown(sectionId, chord.id), 'Chord type up', 'Chord type down');
   const transposeRow = buildCtrlRow('Xpose', () => transposeChordUp(sectionId, chord.id), () => transposeChordDown(sectionId, chord.id), 'Transpose up', 'Transpose down');
 
