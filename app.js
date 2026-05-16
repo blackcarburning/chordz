@@ -67,6 +67,18 @@ const SCALES = [
 
 /** Valid section type strings. */
 const SECTION_TYPES = ['Verse', 'Chorus', 'Bridge', 'Middle 8', 'Change', 'Outro', 'Custom'];
+const PLAYBACK_MODES = ['edit', 'song'];
+const CHORD_SOUND_PRESETS = [
+  { id: 'piano',  label: 'Piano-ish' },
+  { id: 'pad',    label: 'Pad' },
+  { id: 'organ',  label: 'Organ/Square' },
+  { id: 'pluck',  label: 'Pluck' },
+];
+const BASS_SOUND_PRESETS = [
+  { id: 'sineBass',   label: 'Sine Bass' },
+  { id: 'squareBass', label: 'Square Bass' },
+  { id: 'sawBass',    label: 'Saw Bass' },
+];
 
 // =====================================================================
 // FACTORY HELPERS
@@ -96,19 +108,27 @@ function createSection(type) {
     name:      type === 'Custom' ? 'My Section' : type,
     scaleRoot: 0,           // C
     scaleType: 'Major',
-    chords:    defaults.map(c => ({ id: makeId(), root: c.root, type: c.type })),
+    crashOnStart: false,
+    rollAtEnd: false,
+    chords:    defaults.map(c => ({ id: makeId(), root: c.root, type: c.type, beats: 4 })),
   };
 }
 
 function createDefaultSong() {
+  const sections = [
+    createSection('Verse'),
+    createSection('Chorus'),
+    createSection('Bridge'),
+  ];
   return {
     title:    'Untitled Song',
     bpm:      100,
-    sections: [
-      createSection('Verse'),
-      createSection('Chorus'),
-      createSection('Bridge'),
-    ],
+    playbackMode: 'edit',
+    selectedSectionId: sections[0]?.id || null,
+    chordSound: 'piano',
+    bassEnabled: true,
+    bassSound: 'sineBass',
+    sections,
   };
 }
 
@@ -144,6 +164,55 @@ function createDefaultSong() {
 
 let song = createDefaultSong();
 
+function clampInt(value, fallback, min, max) {
+  const n = parseInt(value, 10);
+  if (Number.isNaN(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+function normalizeChord(rawChord) {
+  const chord = rawChord || {};
+  return {
+    id: chord.id || makeId(),
+    root: clampInt(chord.root, 0, 0, 11),
+    type: CHORD_TYPES.some(t => t.name === chord.type) ? chord.type : 'maj',
+    beats: clampInt(chord.beats, 4, 1, 64),
+  };
+}
+
+function normalizeSection(rawSection, fallbackType = 'Custom') {
+  const section = rawSection || {};
+  const type = SECTION_TYPES.includes(section.type) ? section.type : fallbackType;
+  return {
+    id: section.id || makeId(),
+    type,
+    name: section.name || type,
+    scaleRoot: clampInt(section.scaleRoot, 0, 0, 11),
+    scaleType: SCALES.some(s => s.name === section.scaleType) ? section.scaleType : 'Major',
+    crashOnStart: Boolean(section.crashOnStart),
+    rollAtEnd: Boolean(section.rollAtEnd),
+    chords: (Array.isArray(section.chords) ? section.chords : []).map(normalizeChord),
+  };
+}
+
+function normalizeSong(rawSong) {
+  const base = createDefaultSong();
+  const parsed = rawSong || {};
+  const sections = (Array.isArray(parsed.sections) ? parsed.sections : base.sections).map(s => normalizeSection(s, s?.type));
+  if (sections.length === 0) sections.push(createSection('Verse'));
+  const selectedSectionExists = sections.some(s => s.id === parsed.selectedSectionId);
+  return {
+    title: typeof parsed.title === 'string' ? parsed.title : base.title,
+    bpm: clampInt(parsed.bpm, base.bpm, 40, 300),
+    playbackMode: PLAYBACK_MODES.includes(parsed.playbackMode) ? parsed.playbackMode : base.playbackMode,
+    selectedSectionId: selectedSectionExists ? parsed.selectedSectionId : sections[0].id,
+    chordSound: CHORD_SOUND_PRESETS.some(p => p.id === parsed.chordSound) ? parsed.chordSound : base.chordSound,
+    bassEnabled: parsed.bassEnabled === undefined ? base.bassEnabled : Boolean(parsed.bassEnabled),
+    bassSound: BASS_SOUND_PRESETS.some(p => p.id === parsed.bassSound) ? parsed.bassSound : base.bassSound,
+    sections,
+  };
+}
+
 // =====================================================================
 // MUSIC THEORY HELPERS
 // =====================================================================
@@ -167,7 +236,9 @@ function chordTypeObj(typeName) {
 // =====================================================================
 
 function addSection(type) {
-  song.sections.push(createSection(type));
+  const section = createSection(type);
+  song.sections.push(section);
+  if (!song.selectedSectionId) song.selectedSectionId = section.id;
   saveSong();
   render();
 }
@@ -178,6 +249,9 @@ function removeSection(id) {
     return;
   }
   song.sections = song.sections.filter(s => s.id !== id);
+  if (song.selectedSectionId === id) {
+    song.selectedSectionId = song.sections[0]?.id || null;
+  }
   saveSong();
   render();
 }
@@ -214,10 +288,51 @@ function updateSectionScale(id, root, type) {
   renderScaleDisplay(id);
 }
 
+function updateSectionOptions(id, { crashOnStart, rollAtEnd }) {
+  const s = song.sections.find(s => s.id === id);
+  if (!s) return;
+  if (typeof crashOnStart === 'boolean') s.crashOnStart = crashOnStart;
+  if (typeof rollAtEnd === 'boolean') s.rollAtEnd = rollAtEnd;
+  saveSong();
+}
+
+function selectEditSection(sectionId) {
+  if (!song.sections.some(s => s.id === sectionId)) return;
+  song.selectedSectionId = sectionId;
+  saveSong();
+  updatePlaybackModeUI();
+  if (isBeating && song.playbackMode === 'edit') initializePlaybackCursor();
+}
+
+function setPlaybackMode(mode) {
+  if (!PLAYBACK_MODES.includes(mode)) return;
+  song.playbackMode = mode;
+  saveSong();
+  updatePlaybackModeUI();
+  if (isBeating) initializePlaybackCursor();
+}
+
+function setChordSound(soundId) {
+  if (!CHORD_SOUND_PRESETS.some(p => p.id === soundId)) return;
+  song.chordSound = soundId;
+  saveSong();
+}
+
+function setBassEnabled(enabled) {
+  song.bassEnabled = Boolean(enabled);
+  saveSong();
+}
+
+function setBassSound(soundId) {
+  if (!BASS_SOUND_PRESETS.some(p => p.id === soundId)) return;
+  song.bassSound = soundId;
+  saveSong();
+}
+
 function addChord(sectionId) {
   const s = song.sections.find(s => s.id === sectionId);
   if (!s) return;
-  s.chords.push({ id: makeId(), root: 0, type: 'maj' });
+  s.chords.push({ id: makeId(), root: 0, type: 'maj', beats: 4 });
   saveSong();
   render();
 }
@@ -238,6 +353,12 @@ function mutateChord(sectionId, chordId, fn) {
   fn(c);
   saveSong();
   updateChordCard(sectionId, chordId);
+}
+
+function updateChordBeats(sectionId, chordId, rawBeats) {
+  mutateChord(sectionId, chordId, c => { c.beats = clampInt(rawBeats, c.beats || 4, 1, 64); });
+  updateSongGoToControl();
+  if (isBeating) initializePlaybackCursor();
 }
 
 function noteUp(sectionId, chordId) {
@@ -312,7 +433,7 @@ function loadSong() {
       const parsed = JSON.parse(raw);
       // Basic sanity check
       if (parsed && Array.isArray(parsed.sections)) {
-        song = parsed;
+        song = normalizeSong(parsed);
         return true;
       }
     }
@@ -323,7 +444,7 @@ function loadSong() {
 function resetSong() {
   if (!confirm('Clear the current song and start fresh?')) return;
   localStorage.removeItem(STORAGE_KEY);
-  song = createDefaultSong();
+  song = normalizeSong(createDefaultSong());
   render();
 }
 
@@ -353,7 +474,7 @@ function importJSON() {
       try {
         const parsed = JSON.parse(ev.target.result);
         if (!parsed || !Array.isArray(parsed.sections)) throw new Error('Invalid song file.');
-        song = parsed;
+        song = normalizeSong(parsed);
         saveSong();
         render();
       } catch (err) {
@@ -378,6 +499,14 @@ let schedulerTimer = null;
 let nextNoteTime   = 0;
 let currentStep    = 0;
 let isBeating      = false;
+let songEndedPending = false;
+let playbackCursor = {
+  sectionIndex: 0,
+  chordIndex: 0,
+  beatInChord: 0,
+  beatInSection: 0,
+  songBeatIndex: 0,
+};
 
 const STEPS          = 16;    // 16th-note steps per bar
 const LOOKAHEAD_MS   = 25;    // scheduler poll interval
@@ -485,10 +614,274 @@ function scheduleStep(step, time) {
   if (BEAT_PATTERN.hihat[step]) playHiHat(time);
 }
 
+function playCrash(time) {
+  const ctx = getAudioCtx();
+  const dur = 0.8;
+  const len = Math.floor(ctx.sampleRate * dur);
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - (i / len) * 0.3);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const hp = ctx.createBiquadFilter();
+  hp.type = 'highpass';
+  hp.frequency.value = 3500;
+  const gain = ctx.createGain();
+  src.connect(hp);
+  hp.connect(gain);
+  gain.connect(ctx.destination);
+  gain.gain.setValueAtTime(0.55, time);
+  gain.gain.exponentialRampToValueAtTime(0.01, time + dur);
+  src.start(time);
+  src.stop(time + dur);
+}
+
+function playRoll(time) {
+  const hitSpacing = 0.06;
+  for (let i = 0; i < 6; i++) playSnare(time + i * hitSpacing);
+}
+
+function frequencyFromMidi(midi) {
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+function playTone(freq, time, preset, role = 'chord') {
+  const ctx = getAudioCtx();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  const filter = ctx.createBiquadFilter();
+  osc.connect(filter);
+  filter.connect(gain);
+  gain.connect(ctx.destination);
+
+  let attack = 0.01;
+  let hold = 0.6;
+  let sustain = 0.12;
+  let release = 0.32;
+  let volume = role === 'bass' ? 0.18 : 0.14;
+  osc.type = 'triangle';
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(role === 'bass' ? 900 : 1800, time);
+
+  if (preset === 'pad') {
+    osc.type = 'sawtooth';
+    attack = 0.08; hold = 0.9; sustain = 0.1; release = 0.5; volume = 0.09;
+    filter.frequency.setValueAtTime(1200, time);
+  } else if (preset === 'organ') {
+    osc.type = 'square';
+    attack = 0.008; hold = 0.65; sustain = 0.11; release = 0.2; volume = 0.11;
+    filter.frequency.setValueAtTime(2400, time);
+  } else if (preset === 'pluck') {
+    osc.type = 'triangle';
+    attack = 0.005; hold = 0.2; sustain = 0.05; release = 0.18; volume = 0.14;
+    filter.frequency.setValueAtTime(2200, time);
+  } else if (preset === 'squareBass') {
+    osc.type = 'square';
+    attack = 0.008; hold = 0.28; sustain = 0.09; release = 0.18; volume = 0.2;
+    filter.frequency.setValueAtTime(500, time);
+  } else if (preset === 'sawBass') {
+    osc.type = 'sawtooth';
+    attack = 0.01; hold = 0.35; sustain = 0.09; release = 0.22; volume = 0.17;
+    filter.frequency.setValueAtTime(420, time);
+  } else if (preset === 'sineBass') {
+    osc.type = 'sine';
+    attack = 0.01; hold = 0.32; sustain = 0.08; release = 0.18; volume = 0.22;
+    filter.frequency.setValueAtTime(350, time);
+  }
+
+  const end = time + attack + hold + release;
+  osc.frequency.setValueAtTime(freq, time);
+  gain.gain.setValueAtTime(0.0001, time);
+  gain.gain.linearRampToValueAtTime(volume, time + attack);
+  gain.gain.setValueAtTime(sustain, time + attack + hold);
+  gain.gain.exponentialRampToValueAtTime(0.0001, time + attack + hold + release);
+  osc.start(time);
+  osc.stop(end);
+}
+
+function playChordNotes(rootSemitone, typeName, when) {
+  const ctype = chordTypeObj(typeName);
+  const rootMidi = 60 + rootSemitone;
+  ctype.intervals.forEach(interval => {
+    playTone(frequencyFromMidi(rootMidi + interval), when, song.chordSound || 'piano', 'chord');
+  });
+}
+
+function playBassNote(rootSemitone, when) {
+  const bassMidi = 36 + rootSemitone;
+  playTone(frequencyFromMidi(bassMidi), when, song.bassSound || 'sineBass', 'bass');
+}
+
+function getSectionBeatLength(section) {
+  return section.chords.reduce((sum, c) => sum + (c.beats || 4), 0);
+}
+
+function buildSongBeatMap() {
+  const map = [];
+  song.sections.forEach((section, sectionIndex) => {
+    section.chords.forEach((chord, chordIndex) => {
+      const beats = chord.beats || 4;
+      for (let beatInChord = 0; beatInChord < beats; beatInChord++) {
+        map.push({ sectionIndex, chordIndex, beatInChord });
+      }
+    });
+  });
+  return map;
+}
+
+function updateSongGoToControl() {
+  const slider = document.getElementById('song-go-to');
+  if (!slider) return;
+  const map = buildSongBeatMap();
+  slider.max = Math.max(map.length - 1, 0);
+  slider.value = Math.min(parseInt(slider.value || '0', 10), parseInt(slider.max, 10));
+}
+
+function formatPlaybackPosition(sectionIndex, chordIndex, beatInChord) {
+  const section = song.sections[sectionIndex];
+  if (!section) return 'Position: —';
+  const chord = section.chords[chordIndex];
+  if (!chord) return `Position: ${section.name} • (no chords)`;
+  return `Position: ${section.name} • ${noteName(chord.root)}${chord.type} • beat ${beatInChord + 1}/${chord.beats || 4}`;
+}
+
+function updatePlaybackPositionUI(sectionIndex, chordIndex, beatInChord, songBeatIndex) {
+  const positionEl = document.getElementById('playback-position');
+  if (positionEl) positionEl.textContent = formatPlaybackPosition(sectionIndex, chordIndex, beatInChord);
+  const slider = document.getElementById('song-go-to');
+  if (slider && song.playbackMode === 'song') slider.value = String(songBeatIndex);
+  const label = document.getElementById('song-go-to-label');
+  if (label) {
+    const section = song.sections[sectionIndex];
+    const chord = section?.chords[chordIndex];
+    if (section && chord) {
+      label.textContent = `${section.name} → ${noteName(chord.root)}${chord.type} (beat ${beatInChord + 1})`;
+    } else if (section) {
+      label.textContent = `${section.name} → rest`;
+    } else {
+      label.textContent = 'Start';
+    }
+  }
+}
+
+function setSongPositionFromSlider(rawValue) {
+  const map = buildSongBeatMap();
+  if (!map.length) return;
+  const idx = Math.max(0, Math.min(map.length - 1, clampInt(rawValue, 0, 0, map.length - 1)));
+  const point = map[idx];
+  playbackCursor.sectionIndex = point.sectionIndex;
+  playbackCursor.chordIndex = point.chordIndex;
+  playbackCursor.beatInChord = point.beatInChord;
+  const section = song.sections[point.sectionIndex];
+  let sectionOffset = 0;
+  for (let i = 0; i < point.chordIndex; i++) sectionOffset += section.chords[i].beats || 4;
+  playbackCursor.beatInSection = sectionOffset + point.beatInChord;
+  playbackCursor.songBeatIndex = idx;
+  updatePlaybackPositionUI(playbackCursor.sectionIndex, playbackCursor.chordIndex, playbackCursor.beatInChord, playbackCursor.songBeatIndex);
+}
+
+function initializePlaybackCursor() {
+  const mode = song.playbackMode || 'edit';
+  if (mode === 'song') {
+    setSongPositionFromSlider(document.getElementById('song-go-to')?.value || 0);
+    return;
+  }
+  let idx = song.sections.findIndex(s => s.id === song.selectedSectionId);
+  if (idx < 0) idx = 0;
+  playbackCursor.sectionIndex = idx;
+  playbackCursor.chordIndex = 0;
+  playbackCursor.beatInChord = 0;
+  playbackCursor.beatInSection = 0;
+  playbackCursor.songBeatIndex = 0;
+  updatePlaybackPositionUI(playbackCursor.sectionIndex, 0, 0, 0);
+}
+
+function advancePlaybackCursor() {
+  const mode = song.playbackMode || 'edit';
+  const section = song.sections[playbackCursor.sectionIndex];
+  if (!section) return;
+  const chord = section.chords[playbackCursor.chordIndex];
+  if (!chord) return;
+
+  playbackCursor.beatInChord += 1;
+  playbackCursor.beatInSection += 1;
+  if (mode === 'song') playbackCursor.songBeatIndex += 1;
+
+  if (playbackCursor.beatInChord >= (chord.beats || 4)) {
+    playbackCursor.beatInChord = 0;
+    playbackCursor.chordIndex += 1;
+  }
+
+  if (playbackCursor.chordIndex >= section.chords.length) {
+    if (mode === 'edit') {
+      playbackCursor.chordIndex = 0;
+      playbackCursor.beatInChord = 0;
+      playbackCursor.beatInSection = 0;
+      return;
+    }
+    playbackCursor.sectionIndex += 1;
+    playbackCursor.chordIndex = 0;
+    playbackCursor.beatInChord = 0;
+    playbackCursor.beatInSection = 0;
+    if (playbackCursor.sectionIndex >= song.sections.length) {
+      playbackCursor.sectionIndex = song.sections.length - 1;
+      songEndedPending = true;
+    }
+  }
+}
+
+function scheduleMusicalBeat(time) {
+  if (!song.sections.length) return;
+  const section = song.sections[playbackCursor.sectionIndex];
+  if (!section) return;
+  if (!section.chords.length) {
+    updatePlaybackPositionUI(playbackCursor.sectionIndex, 0, 0, playbackCursor.songBeatIndex);
+    if ((song.playbackMode || 'edit') === 'song') {
+      playbackCursor.sectionIndex += 1;
+      playbackCursor.chordIndex = 0;
+      playbackCursor.beatInChord = 0;
+      playbackCursor.beatInSection = 0;
+      if (playbackCursor.sectionIndex >= song.sections.length) {
+        playbackCursor.sectionIndex = song.sections.length - 1;
+        songEndedPending = true;
+      }
+    }
+    return;
+  }
+  const chord = section.chords[playbackCursor.chordIndex];
+  if (!chord) return;
+
+  if (playbackCursor.beatInSection === 0 && section.crashOnStart) playCrash(time);
+  if (playbackCursor.beatInChord === 0) {
+    playChordNotes(chord.root, chord.type, time);
+    if (song.bassEnabled) playBassNote(chord.root, time);
+  }
+
+  const sectionBeats = getSectionBeatLength(section);
+  if (section.rollAtEnd && playbackCursor.beatInSection === sectionBeats - 1) {
+    playRoll(time);
+  }
+
+  updatePlaybackPositionUI(playbackCursor.sectionIndex, playbackCursor.chordIndex, playbackCursor.beatInChord, playbackCursor.songBeatIndex);
+  advancePlaybackCursor();
+
+  if (songEndedPending) {
+    songEndedPending = false;
+    const delay = Math.max(0, (time - getAudioCtx().currentTime) * 1000);
+    setTimeout(() => {
+      stopBeat();
+      stopIndicatorFlash();
+      const pos = document.getElementById('playback-position');
+      if (pos) pos.textContent += ' • End';
+    }, delay + 20);
+  }
+}
+
 function scheduler() {
   const ctx = getAudioCtx();
   while (nextNoteTime < ctx.currentTime + SCHEDULE_AHEAD) {
     scheduleStep(currentStep, nextNoteTime);
+    if (currentStep % 4 === 0 && isBeating) scheduleMusicalBeat(nextNoteTime);
     const secPerSixteenth = (60.0 / song.bpm) / 4;
     nextNoteTime += secPerSixteenth;
     currentStep   = (currentStep + 1) % STEPS;
@@ -499,7 +892,9 @@ function scheduler() {
 function startBeat() {
   if (isBeating) stopBeat();
   isBeating    = true;
+  songEndedPending = false;
   currentStep  = 0;
+  initializePlaybackCursor();
   nextNoteTime = getAudioCtx().currentTime + 0.05;
   scheduler();
   document.getElementById('beat-start').disabled = true;
@@ -515,30 +910,14 @@ function stopBeat() {
   document.getElementById('beat-indicator').classList.remove('playing');
 }
 
-/** Audition a chord as an arpeggiated triangle-wave chord. */
+/** Audition a chord as an arpeggiated chord using the selected chord sound. */
 function auditionChord(rootSemitone, typeName) {
-  const ctx   = getAudioCtx();
   const ctype = chordTypeObj(typeName);
   const rootMidi = 60 + rootSemitone; // C4 base
 
   ctype.intervals.forEach((interval, i) => {
-    const midi = rootMidi + interval;
-    const freq = 440 * Math.pow(2, (midi - 69) / 12);
-
-    const osc  = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type   = 'triangle';
-    osc.frequency.value = freq;
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-
-    const t = ctx.currentTime + i * 0.06;
-    gain.gain.setValueAtTime(0, t);
-    gain.gain.linearRampToValueAtTime(0.14, t + 0.02);
-    gain.gain.setValueAtTime(0.14, t + 0.9);
-    gain.gain.exponentialRampToValueAtTime(0.01, t + 1.4);
-    osc.start(t);
-    osc.stop(t + 1.45);
+    const t = getAudioCtx().currentTime + i * 0.06;
+    playTone(frequencyFromMidi(rootMidi + interval), t, song.chordSound || 'piano', 'chord');
   });
 }
 
@@ -547,6 +926,8 @@ function auditionChord(rootSemitone, typeName) {
 // =====================================================================
 
 function render() {
+  song = normalizeSong(song);
+
   // Title
   const titleEl = document.getElementById('song-title');
   if (titleEl) titleEl.value = song.title || '';
@@ -555,11 +936,55 @@ function render() {
   const bpmEl = document.getElementById('bpm-input');
   if (bpmEl) bpmEl.value = song.bpm || 100;
 
+  const modeEl = document.getElementById('playback-mode-select');
+  if (modeEl) modeEl.value = song.playbackMode || 'edit';
+
+  const chordSoundEl = document.getElementById('chord-sound-select');
+  if (chordSoundEl && chordSoundEl.options.length === 0) {
+    CHORD_SOUND_PRESETS.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.label;
+      chordSoundEl.appendChild(opt);
+    });
+  }
+  if (chordSoundEl) chordSoundEl.value = song.chordSound || 'piano';
+
+  const bassSoundEl = document.getElementById('bass-sound-select');
+  if (bassSoundEl && bassSoundEl.options.length === 0) {
+    BASS_SOUND_PRESETS.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.label;
+      bassSoundEl.appendChild(opt);
+    });
+  }
+  if (bassSoundEl) bassSoundEl.value = song.bassSound || 'sineBass';
+
+  const bassEnabledEl = document.getElementById('bass-enabled');
+  if (bassEnabledEl) bassEnabledEl.checked = Boolean(song.bassEnabled);
+
   // Sections
   const container = document.getElementById('sections-container');
   if (!container) return;
   container.innerHTML = '';
   song.sections.forEach(section => container.appendChild(buildSection(section)));
+  updateSongGoToControl();
+  updatePlaybackModeUI();
+  initializePlaybackCursor();
+}
+
+function updatePlaybackModeUI() {
+  const isEdit = (song.playbackMode || 'edit') === 'edit';
+  document.querySelectorAll('.section-play-select').forEach(el => {
+    el.style.display = isEdit ? 'inline-flex' : 'none';
+  });
+  const editHelp = document.getElementById('playback-help-edit');
+  const songHelp = document.getElementById('playback-help-song');
+  if (editHelp) editHelp.style.display = isEdit ? 'block' : 'none';
+  if (songHelp) songHelp.style.display = isEdit ? 'none' : 'block';
+  const slider = document.getElementById('song-go-to');
+  if (slider) slider.disabled = isEdit;
 }
 
 /** Partial re-render: update only the scale notes display for one section. */
@@ -578,11 +1003,13 @@ function updateChordCard(sectionId, chordId) {
   if (!c) return;
   const rootEl = document.getElementById('root-' + chordId);
   const qualEl = document.getElementById('qual-' + chordId);
+  const beatsEl = document.getElementById('beats-' + chordId);
   if (rootEl) rootEl.textContent = noteName(c.root);
   if (qualEl) {
     qualEl.textContent = c.type;
     qualEl.title       = chordTypeObj(c.type).label;
   }
+  if (beatsEl) beatsEl.value = c.beats || 4;
 }
 
 // ----- Section builder -----------------------------------------------
@@ -595,6 +1022,7 @@ function buildSection(section) {
 
   div.appendChild(buildSectionHeader(section));
   div.appendChild(buildScaleRow(section));
+  div.appendChild(buildSectionOptionsRow(section));
   div.appendChild(buildChordsArea(section));
   return div;
 }
@@ -617,6 +1045,18 @@ function buildSectionHeader(section) {
   nameInput.setAttribute('aria-label', 'Section name');
   nameInput.addEventListener('input', () => updateSectionName(section.id, nameInput.value));
 
+  const playSelect = document.createElement('label');
+  playSelect.className = 'section-play-select';
+  const radio = document.createElement('input');
+  radio.type = 'radio';
+  radio.name = 'edit-play-section';
+  radio.value = section.id;
+  radio.checked = song.selectedSectionId === section.id;
+  radio.addEventListener('change', () => selectEditSection(section.id));
+  const radioText = document.createElement('span');
+  radioText.textContent = 'Edit play';
+  playSelect.append(radio, radioText);
+
   // Action buttons
   const actions = document.createElement('div');
   actions.className = 'section-header-actions';
@@ -627,7 +1067,7 @@ function buildSectionHeader(section) {
   rmBtn.classList.add('danger');
   actions.append(upBtn, dnBtn, rmBtn);
 
-  header.append(badge, nameInput, actions);
+  header.append(badge, playSelect, nameInput, actions);
   return header;
 }
 
@@ -668,6 +1108,30 @@ function buildScaleRow(section) {
   notes.textContent = getScaleNotes(section.scaleRoot, section.scaleType).join('  ');
 
   row.append(lbl, rootSel, typeSel, notes);
+  return row;
+}
+
+function buildSectionOptionsRow(section) {
+  const row = document.createElement('div');
+  row.className = 'section-options-row';
+
+  const crashLabel = document.createElement('label');
+  crashLabel.className = 'checkbox-inline';
+  const crashCb = document.createElement('input');
+  crashCb.type = 'checkbox';
+  crashCb.checked = Boolean(section.crashOnStart);
+  crashCb.addEventListener('change', () => updateSectionOptions(section.id, { crashOnStart: crashCb.checked }));
+  crashLabel.append(crashCb, document.createTextNode('Crash at start'));
+
+  const rollLabel = document.createElement('label');
+  rollLabel.className = 'checkbox-inline';
+  const rollCb = document.createElement('input');
+  rollCb.type = 'checkbox';
+  rollCb.checked = Boolean(section.rollAtEnd);
+  rollCb.addEventListener('change', () => updateSectionOptions(section.id, { rollAtEnd: rollCb.checked }));
+  rollLabel.append(rollCb, document.createTextNode('Roll at end'));
+
+  row.append(crashLabel, rollLabel);
   return row;
 }
 
@@ -736,6 +1200,24 @@ function buildChordCard(chord, sectionId) {
   const div2 = document.createElement('div');
   div2.className = 'chord-divider';
 
+  const beatsRow = document.createElement('div');
+  beatsRow.className = 'beats-row';
+  const beatsLabel = document.createElement('label');
+  beatsLabel.textContent = 'Beats';
+  beatsLabel.setAttribute('for', 'beats-' + chord.id);
+  const beatsInput = document.createElement('input');
+  beatsInput.id = 'beats-' + chord.id;
+  beatsInput.className = 'beats-input';
+  beatsInput.type = 'number';
+  beatsInput.min = '1';
+  beatsInput.max = '64';
+  beatsInput.step = '1';
+  beatsInput.value = chord.beats || 4;
+  beatsInput.setAttribute('aria-label', 'Chord beats');
+  beatsInput.addEventListener('change', () => updateChordBeats(sectionId, chord.id, beatsInput.value));
+  beatsInput.addEventListener('input', () => updateChordBeats(sectionId, chord.id, beatsInput.value));
+  beatsRow.append(beatsLabel, beatsInput);
+
   // Action bar: audition + remove
   const actionBar = document.createElement('div');
   actionBar.className = 'chord-action-bar';
@@ -756,7 +1238,7 @@ function buildChordCard(chord, sectionId) {
 
   actionBar.append(audBtn, rmBtn);
 
-  card.append(rootEl, qualEl, div1, noteRow, typeRow, xposeRow, div2, actionBar);
+  card.append(rootEl, qualEl, div1, noteRow, typeRow, xposeRow, div2, beatsRow, actionBar);
   return card;
 }
 
@@ -827,6 +1309,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ----- Load saved song or use defaults ---------------------------
   loadSong();
+  song = normalizeSong(song);
   render();
 
   // ----- Song title ------------------------------------------------
@@ -838,6 +1321,16 @@ document.addEventListener('DOMContentLoaded', () => {
   bpmInput.addEventListener('input',  e  => updateBpm(e.target.value));
   document.getElementById('bpm-down').addEventListener('click', () => updateBpm(song.bpm - 5));
   document.getElementById('bpm-up').addEventListener('click',   () => updateBpm(song.bpm + 5));
+
+  // ----- Playback mode / sounds / bass -----------------------------
+  document.getElementById('playback-mode-select').addEventListener('change', e => setPlaybackMode(e.target.value));
+  document.getElementById('chord-sound-select').addEventListener('change', e => setChordSound(e.target.value));
+  document.getElementById('bass-sound-select').addEventListener('change', e => setBassSound(e.target.value));
+  document.getElementById('bass-enabled').addEventListener('change', e => setBassEnabled(e.target.checked));
+  document.getElementById('song-go-to').addEventListener('input', e => {
+    setSongPositionFromSlider(e.target.value);
+    if (isBeating && song.playbackMode === 'song') initializePlaybackCursor();
+  });
 
   // ----- Beat controls ---------------------------------------------
   document.getElementById('beat-start').addEventListener('click', () => {

@@ -32,6 +32,27 @@
         <span class="beat-indicator" id="beat-indicator" aria-hidden="true"></span>
       </div>
 
+      <!-- Playback mode -->
+      <div class="ctrl-group" title="Playback mode">
+        <label class="ctrl-label" for="playback-mode-select">Mode</label>
+        <select id="playback-mode-select" aria-label="Playback mode">
+          <option value="edit">Edit</option>
+          <option value="song">Song</option>
+        </select>
+      </div>
+
+      <!-- Sound controls -->
+      <div class="ctrl-group" title="Sound controls">
+        <label class="ctrl-label" for="chord-sound-select">Chord</label>
+        <select id="chord-sound-select" aria-label="Chord sound"></select>
+        <label class="ctrl-label" for="bass-sound-select">Bass</label>
+        <select id="bass-sound-select" aria-label="Bass sound"></select>
+        <label class="checkbox-inline">
+          <input type="checkbox" id="bass-enabled" />
+          Bass
+        </label>
+      </div>
+
       <!-- Global transpose -->
       <div class="ctrl-group" title="Transpose whole song by semitone">
         <span class="ctrl-label">Transpose</span>
@@ -53,6 +74,24 @@
   <!-- ===== SONG TITLE ===== -->
   <div class="song-title-bar">
     <input type="text" id="song-title" placeholder="Song title…" aria-label="Song title" />
+  </div>
+
+  <!-- ===== PLAYBACK HELP + SCRUB ===== -->
+  <div class="playback-panel" aria-label="Playback controls">
+    <p class="playback-help" id="playback-help-edit">
+      <strong>Edit mode:</strong> choose a section radio button and that section loops while the beat runs.
+      Chord <strong>Beats</strong> set how long each chord lasts.
+    </p>
+    <p class="playback-help" id="playback-help-song">
+      <strong>Song mode:</strong> the full song plays section-by-section once, then stops. Use <strong>Go to</strong> to jump.
+      Crash/roll section options trigger at section start/end.
+    </p>
+    <div class="go-to-row">
+      <label for="song-go-to">Go to</label>
+      <input type="range" id="song-go-to" min="0" max="0" value="0" aria-label="Go to song position" />
+      <span id="song-go-to-label">Start</span>
+    </div>
+    <div class="playback-position" id="playback-position">Position: —</div>
   </div>
 
   <!-- ===== SECTIONS ===== -->
@@ -100,7 +139,19 @@
           <dd>Shifts every chord root and every section scale root by one semitone across the whole song.</dd>
 
           <dt>🥁 Beat</dt>
-          <dd>A simple kick/snare/hi-hat pattern plays at the selected BPM. Adjust BPM with + / − or type a value.</dd>
+          <dd>A simple kick/snare/hi-hat pattern plays at the selected BPM. In Edit mode, the selected section radio loops. In Song mode, the full arrangement plays through once.</dd>
+
+          <dt>📍 Go to / position</dt>
+          <dd>In Song mode, use the Go to slider to jump to a song location. The position display shows current section, chord, and beat.</dd>
+
+          <dt>⏱️ Chord Beats</dt>
+          <dd>Each chord defaults to 4 beats (1 bar). Change Beats on each chord card to control progression length.</dd>
+
+          <dt>🎛️ Chord/Bass sounds</dt>
+          <dd>Select separate sound presets for chord playback and bass. Bass can be enabled/disabled independently.</dd>
+
+          <dt>🥁 Section Crash / Roll</dt>
+          <dd>Each section has checkboxes for a crash cymbal at section start and a simple roll at section end.</dd>
 
           <dt>💾 Save / Export / Import</dt>
           <dd>Save stores the song in your browser (localStorage). Export downloads a <code>.json</code> file. Import loads a saved file. 🆕 New clears everything.</dd>
