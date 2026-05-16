@@ -674,6 +674,10 @@ function beatsToSeconds(beats) {
   return (60 / song.bpm) * Math.max(1, beats || 1);
 }
 
+function beatOffsetToSeconds(beats) {
+  return (60 / song.bpm) * Math.max(0, Number.isFinite(Number(beats)) ? Number(beats) : 0);
+}
+
 // =====================================================================
 // SONG MUTATIONS
 // =====================================================================
@@ -1731,7 +1735,7 @@ function playChordNotes(rootSemitone, typeName, when, beats = 4, repeats = 1, st
   const hitBeats = Math.max(0.25, activeBeats / repeatCount);
   const hitDuration = Math.max(0.1, beatsToSeconds(hitBeats) * 0.92);
   for (let hit = 0; hit < repeatCount; hit++) {
-    const hitTime = when + beatsToSeconds(startOffsetBeats + hit * hitBeats);
+    const hitTime = when + beatOffsetToSeconds(startOffsetBeats + hit * hitBeats);
     chordType.intervals.forEach(interval => {
       playSynthVoice(
         frequencyFromMidi(rootMidi + interval),
@@ -1754,7 +1758,7 @@ function playBassNote(rootSemitone, when, beats = 4, repeats = 1, startBeat = 1)
   const hitBeats = Math.max(0.25, activeBeats / repeatCount);
   const hitDuration = Math.max(0.09, beatsToSeconds(hitBeats) * 0.9);
   for (let hit = 0; hit < repeatCount; hit++) {
-    const hitTime = when + beatsToSeconds(startOffsetBeats + hit * hitBeats);
+    const hitTime = when + beatOffsetToSeconds(startOffsetBeats + hit * hitBeats);
     playSynthVoice(frequencyFromMidi(bassMidi), hitTime, hitDuration, song.bassSynth, 'bass');
   }
 }
