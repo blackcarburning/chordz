@@ -937,6 +937,14 @@ function commitSong({ rerender = false, refreshCursor = false, flushNoteBuffer =
   updatePlaybackHighlights();
 }
 
+function handleSchedulingParameterChange(options = {}) {
+  commitSong({ ...options, flushNoteBuffer: true });
+}
+
+function handleSynthParameterChange(options = {}) {
+  commitSong(options);
+}
+
 function addSection(type) {
   const section = createSection(type);
   section.drumPatternId = song.drumPatterns?.[0]?.id || null;
@@ -1032,30 +1040,30 @@ function setSynthPreset(kind, presetId) {
     song.chordSound = resolved;
     song.chordSynth = createSynthSettings('chord', resolved);
   }
-  commitSong({ flushNoteBuffer: true });
+  handleSynthParameterChange();
   renderSynthRack();
 }
 
 function setBassEnabled(enabled) {
   song.bassEnabled = Boolean(enabled);
-  commitSong({ flushNoteBuffer: true });
+  handleSchedulingParameterChange();
 }
 
 function setBassPitchMode(mode) {
   if (!BASS_PITCH_MODES.includes(mode)) return;
   song.bassPitchMode = mode;
-  commitSong({ rerender: true, refreshCursor: true, flushNoteBuffer: true });
+  handleSchedulingParameterChange({ rerender: true, refreshCursor: true });
 }
 
 function setStringEnabled(enabled) {
   song.stringEnabled = Boolean(enabled);
-  commitSong({ flushNoteBuffer: true });
+  handleSchedulingParameterChange();
 }
 
 function setStringPitchMode(mode) {
   if (!STRING_PITCH_MODES.includes(mode)) return;
   song.stringPitchMode = mode;
-  commitSong({ rerender: true, refreshCursor: true, flushNoteBuffer: true });
+  handleSchedulingParameterChange({ rerender: true, refreshCursor: true });
 }
 
 function setSynthPanelExpanded(kind, expanded) {
@@ -1074,7 +1082,7 @@ function updateSynthField(kind, fieldKey, value) {
   if (kind === 'bass') song.bassSound = 'custom';
   else if (kind === 'string') song.stringSound = 'custom';
   else song.chordSound = 'custom';
-  commitSong({ flushNoteBuffer: true });
+  handleSynthParameterChange();
   const presetSelect = document.getElementById(`${kind}-preset-select`);
   if (presetSelect) presetSelect.value = 'custom';
 }
@@ -1090,7 +1098,7 @@ function updateSynthWaveform(kind, fieldKey, value) {
   if (kind === 'bass') song.bassSound = 'custom';
   else if (kind === 'string') song.stringSound = 'custom';
   else song.chordSound = 'custom';
-  commitSong({ flushNoteBuffer: true });
+  handleSynthParameterChange();
   renderSynthRack();
 }
 
@@ -1136,7 +1144,7 @@ function mutateChord(sectionId, chordId, fn, { rerender = false, refreshCursor =
   const chord = section.chords.find(entry => entry.id === chordId);
   if (!chord) return;
   fn(chord);
-  commitSong({ rerender, refreshCursor, flushNoteBuffer: true });
+  handleSchedulingParameterChange({ rerender, refreshCursor });
   if (!rerender) {
     updateChordCard(sectionId, chordId);
     renderArrangementPanel(sectionId);
@@ -1292,7 +1300,7 @@ function transposeSong(steps) {
       if ((song.stringPitchMode || 'linked') !== 'free') chord.stringRoot = chord.root;
     });
   });
-  commitSong({ rerender: true, refreshCursor: true, flushNoteBuffer: true });
+  handleSchedulingParameterChange({ rerender: true, refreshCursor: true });
 }
 
 function updateBpm(raw) {
@@ -1300,7 +1308,7 @@ function updateBpm(raw) {
   song.bpm = value;
   const element = document.getElementById('bpm-input');
   if (element && parseInt(element.value, 10) !== value) element.value = value;
-  commitSong({ flushNoteBuffer: true });
+  handleSchedulingParameterChange();
 }
 
 function updateMixerField(field, value) {
