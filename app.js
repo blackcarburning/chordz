@@ -1012,7 +1012,10 @@ function selectEditSection(sectionId) {
   updatePlaybackModeUI();
   updatePlaybackHighlights();
   renderDrumSequencer();
-  if (isBeating && song.playbackMode === 'edit') initializePlaybackCursor();
+  if (isBeating && song.playbackMode === 'edit') {
+    initializePlaybackCursor();
+    flushScheduledNotes({ restartPlayback: true });
+  }
 }
 
 function setPlaybackMode(mode) {
@@ -1023,7 +1026,10 @@ function setPlaybackMode(mode) {
   updatePlaybackModeUI();
   if (isBeating) {
     if (mode === 'looping' && getActiveLoopTarget()) movePlaybackToActiveLoopTarget({ rescheduleAudio: true });
-    else initializePlaybackCursor();
+    else {
+      initializePlaybackCursor();
+      flushScheduledNotes({ restartPlayback: true });
+    }
   }
 }
 
@@ -1625,6 +1631,7 @@ let schedulerTimer = null;
 let schedulerGeneration = 0;
 let nextNoteTime = 0;
 let currentStep = 0;
+let currentBeatStepBase = 0;
 let isBeating = false;
 let songEndedPending = false;
 let playbackCursor = {
@@ -1643,6 +1650,11 @@ let lastHighlightedChordId = null;
 const STEPS = 16;
 const LOOKAHEAD_MS = 25;
 const SCHEDULE_AHEAD = 0.1;
+
+function getSectionSixteenthOffset(beatInSection) {
+  const beat = clampInt(beatInSection, 0, 0, 1000000);
+  return (beat * 4) % STEPS;
+}
 
 function getAudioCtx() {
   if (!audioCtx) {
@@ -1796,6 +1808,7 @@ function flushScheduledNotes({ restartPlayback = false } = {}) {
   stopAndClearActiveAudioNodes();
   if (!(restartPlayback && isBeating)) return;
   currentStep = 0;
+  currentBeatStepBase = getSectionSixteenthOffset(playbackCursor.beatInSection);
   nextNoteTime = getAudioCtx().currentTime + 0.05;
   scheduler(schedulerGeneration);
 }
@@ -2587,8 +2600,10 @@ function scheduler(generation = schedulerGeneration) {
   const ctx = getAudioCtx();
   debugState.counters.schedulerTicks += 1;
   while (nextNoteTime < ctx.currentTime + SCHEDULE_AHEAD) {
-    scheduleStep(currentStep, nextNoteTime);
-    if (currentStep % 4 === 0 && isBeating) scheduleMusicalBeat(nextNoteTime);
+    const beatSubdivision = currentStep % 4;
+    if (beatSubdivision === 0) currentBeatStepBase = getSectionSixteenthOffset(playbackCursor.beatInSection);
+    scheduleStep((currentBeatStepBase + beatSubdivision) % STEPS, nextNoteTime);
+    if (beatSubdivision === 0 && isBeating) scheduleMusicalBeat(nextNoteTime);
     const secondsPerSixteenth = (60 / song.bpm) / 4;
     nextNoteTime += secondsPerSixteenth;
     currentStep = (currentStep + 1) % STEPS;
@@ -2606,6 +2621,7 @@ function startBeat() {
   schedulerGeneration += 1;
   currentStep = 0;
   initializePlaybackCursor();
+  currentBeatStepBase = getSectionSixteenthOffset(playbackCursor.beatInSection);
   nextNoteTime = getAudioCtx().currentTime + 0.05;
   debugLog('Playback started');
   scheduler(schedulerGeneration);
@@ -4138,7 +4154,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('playback-mode-select').addEventListener('change', event => setPlaybackMode(event.target.value));
   document.getElementById('song-go-to').addEventListener('input', event => {
     setSongPositionFromSlider(event.target.value);
-    if (isBeating && usesSongTimelineMode(song.playbackMode)) initializePlaybackCursor();
+    if (isBeating && usesSongTimelineMode(song.playbackMode)) flushScheduledNotes({ restartPlayback: true });
   });
 
   document.getElementById('beat-start').addEventListener('click', () => {
