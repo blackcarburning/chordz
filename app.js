@@ -57,9 +57,21 @@ const SCALES = [
 const SECTION_TYPES = ['Verse', 'Chorus', 'Bridge', 'Middle 8', 'Change', 'Outro', 'Custom'];
 const PLAYBACK_MODES = ['edit', 'song', 'looping'];
 const BASS_PITCH_MODES = ['linked', 'free'];
-const NOTE_REPEAT_OPTIONS = [1, 2, 4];
+const STRING_PITCH_MODES = ['linked', 'free'];
+const NOTE_REPEAT_OPTIONS = [1, 2, 4, 8, 16, 32];
 const START_BEAT_OPTIONS = [1, 2, 3, 4];
-const ARP_MODES = ['off', 'up', 'down', 'upDown'];
+const CHORD_NOTE_COUNT_OPTIONS = Array.from({ length: 16 }, (_, index) => index + 1);
+const ARP_MODES = ['off', 'up', 'down', 'upDown', 'outsideIn', 'insideOut', 'upSkip', 'downSkip'];
+const ARP_MODE_OPTIONS = [
+  { value: 'off', text: 'Off' },
+  { value: 'up', text: 'Up' },
+  { value: 'down', text: 'Down' },
+  { value: 'upDown', text: 'Up and down' },
+  { value: 'outsideIn', text: 'Outside in' },
+  { value: 'insideOut', text: 'Inside out' },
+  { value: 'upSkip', text: 'Up skip' },
+  { value: 'downSkip', text: 'Down skip' },
+];
 const RECENT_SONG_LIMIT = 8;
 const DEFAULT_CHORD_ROOT = -12;
 
@@ -223,6 +235,42 @@ const SYNTH_PRESET_LIBRARY = {
       volume: 0.23,
     },
   },
+  string: {
+    lushStrings: {
+      label: 'Lush Strings',
+      osc1Type: 'sawtooth',
+      osc2Type: 'triangle',
+      osc3Type: 'sawtooth',
+      osc4Type: 'triangle',
+      osc2Interval: 7,
+      detune: 6,
+      mix: 0.48,
+      attack: 0.08,
+      decay: 0.34,
+      sustain: 0.78,
+      release: 0.9,
+      cutoff: 2200,
+      resonance: 1.2,
+      volume: 0.14,
+    },
+    softStrings: {
+      label: 'Soft Strings',
+      osc1Type: 'triangle',
+      osc2Type: 'sine',
+      osc3Type: 'triangle',
+      osc4Type: 'sine',
+      osc2Interval: 12,
+      detune: 4,
+      mix: 0.42,
+      attack: 0.12,
+      decay: 0.42,
+      sustain: 0.72,
+      release: 1.1,
+      cutoff: 1800,
+      resonance: 0.9,
+      volume: 0.13,
+    },
+  },
 };
 
 const CHORD_SOUND_PRESETS = [
@@ -240,6 +288,12 @@ const BASS_SOUND_PRESETS = [
   { id: 'custom', label: 'Custom' },
 ];
 
+const STRING_SOUND_PRESETS = [
+  { id: 'lushStrings', label: 'Lush Strings' },
+  { id: 'softStrings', label: 'Soft Strings' },
+  { id: 'custom', label: 'Custom' },
+];
+
 const LEGACY_CHORD_PRESET_MAP = {
   piano: 'softKeys',
   pad: 'warmPad',
@@ -252,6 +306,8 @@ const LEGACY_BASS_PRESET_MAP = {
   sawBass: 'sawBass',
   squareBass: 'squareBass',
 };
+
+const LEGACY_STRING_PRESET_MAP = {};
 
 const SYNTH_UI_FIELDS = [
   { key: 'transpose', label: 'Transpose', min: -24, max: 24, step: 1, format: value => `${value > 0 ? '+' : ''}${Math.round(value)} st` },
@@ -315,22 +371,38 @@ function replacePitchClass(currentSemitone, newPitchClass) {
   return current - normalizePitchClass(current) + targetPitchClass;
 }
 
+function getPresetLibrary(kind) {
+  if (kind === 'bass') return SYNTH_PRESET_LIBRARY.bass;
+  if (kind === 'string') return SYNTH_PRESET_LIBRARY.string;
+  return SYNTH_PRESET_LIBRARY.chord;
+}
+
+function getDefaultPresetId(kind) {
+  if (kind === 'bass') return 'roundBass';
+  if (kind === 'string') return 'lushStrings';
+  return 'warmPad';
+}
+
+function getLegacyPresetMap(kind) {
+  if (kind === 'bass') return LEGACY_BASS_PRESET_MAP;
+  if (kind === 'string') return LEGACY_STRING_PRESET_MAP;
+  return LEGACY_CHORD_PRESET_MAP;
+}
+
 function resolvePresetId(kind, rawPreset) {
-  const library = kind === 'bass' ? SYNTH_PRESET_LIBRARY.bass : SYNTH_PRESET_LIBRARY.chord;
+  const library = getPresetLibrary(kind);
   if (rawPreset === 'custom') return 'custom';
-  const mapped = kind === 'bass'
-    ? (LEGACY_BASS_PRESET_MAP[rawPreset] || rawPreset)
-    : (LEGACY_CHORD_PRESET_MAP[rawPreset] || rawPreset);
-  return library[mapped] ? mapped : (kind === 'bass' ? 'roundBass' : 'warmPad');
+  const mapped = getLegacyPresetMap(kind)[rawPreset] || rawPreset;
+  return library[mapped] ? mapped : getDefaultPresetId(kind);
 }
 
 function createSynthSettings(kind, presetId) {
   const resolvedPreset = resolvePresetId(kind, presetId);
   const defaultPreset = resolvedPreset === 'custom'
-    ? (kind === 'bass' ? 'roundBass' : 'warmPad')
+    ? getDefaultPresetId(kind)
     : resolvedPreset;
-  const preset = (kind === 'bass' ? SYNTH_PRESET_LIBRARY.bass : SYNTH_PRESET_LIBRARY.chord)[defaultPreset];
-  return {
+  const preset = getPresetLibrary(kind)[defaultPreset];
+  const settings = {
     preset: resolvedPreset,
     osc1Type: preset.osc1Type,
     osc2Type: preset.osc2Type,
@@ -349,13 +421,18 @@ function createSynthSettings(kind, presetId) {
     modRate: 0,
     modDepth: 0,
   };
+  if (kind === 'string') {
+    settings.osc3Type = preset.osc3Type || preset.osc1Type;
+    settings.osc4Type = preset.osc4Type || preset.osc2Type;
+  }
+  return settings;
 }
 
 function normalizeSynthSettings(kind, rawSynth, legacyPreset) {
   const synth = rawSynth || {};
   const presetId = resolvePresetId(kind, synth.preset || legacyPreset);
   const base = createSynthSettings(kind, presetId === 'custom'
-    ? (legacyPreset || (kind === 'bass' ? 'roundBass' : 'warmPad'))
+    ? (legacyPreset || getDefaultPresetId(kind))
     : presetId);
 
   const normalized = {
@@ -377,6 +454,10 @@ function normalizeSynthSettings(kind, rawSynth, legacyPreset) {
     modRate: clampNumber(synth.modRate, base.modRate, 0, 12),
     modDepth: clampNumber(synth.modDepth, base.modDepth, 0, 80),
   };
+  if (kind === 'string') {
+    normalized.osc3Type = OSC_TYPES.includes(synth.osc3Type) ? synth.osc3Type : base.osc3Type;
+    normalized.osc4Type = OSC_TYPES.includes(synth.osc4Type) ? synth.osc4Type : base.osc4Type;
+  }
 
   if (presetId !== 'custom' && synth.preset === 'custom') normalized.preset = 'custom';
   return normalized;
@@ -411,21 +492,27 @@ function createDefaultSong() {
     playbackMode: 'edit',
     selectedSectionId: sections[0]?.id || null,
     bassPitchMode: 'linked',
+    stringPitchMode: 'linked',
     chordSound: 'warmPad',
     chordSynth: createSynthSettings('chord', 'warmPad'),
     bassEnabled: true,
     bassSound: 'roundBass',
     bassSynth: createSynthSettings('bass', 'roundBass'),
+    stringEnabled: false,
+    stringSound: 'lushStrings',
+    stringSynth: createSynthSettings('string', 'lushStrings'),
     drumPatterns,
     mixer: {
       chordVolume: 0.9,
       bassVolume: 0.9,
+      stringVolume: 0.9,
       drumsVolume: 0.9,
       masterVolume: 0.95,
     },
     reverb: {
       chordWet: 0.2,
       bassWet: 0.16,
+      stringWet: 0.22,
     },
     arranger: [],
     sections,
@@ -433,7 +520,7 @@ function createDefaultSong() {
 }
 
 function normalizeRepeat(value, fallback = 1) {
-  const repeat = clampInt(value, fallback, 1, 4);
+  const repeat = clampInt(value, fallback, 1, 32);
   return NOTE_REPEAT_OPTIONS.includes(repeat) ? repeat : fallback;
 }
 
@@ -443,14 +530,17 @@ function normalizeStartBeat(value, fallback = 1) {
 
 function createChord(root = DEFAULT_CHORD_ROOT, type = 'maj') {
   const normalizedRoot = normalizeSemitone(root, DEFAULT_CHORD_ROOT);
+  const normalizedType = CHORD_TYPES.some(entry => entry.name === type) ? type : 'maj';
   return {
     id: makeId(),
     root: normalizedRoot,
     bassRoot: normalizedRoot,
-    type: CHORD_TYPES.some(entry => entry.name === type) ? type : 'maj',
+    stringRoot: normalizedRoot,
+    type: normalizedType,
     beats: 4,
     chordRepeat: 1,
     bassRepeat: 1,
+    noteCount: clampInt(chordTypeObj(normalizedType).intervals.length, 3, 1, 16),
     startBeat: 1,
     loopEnabled: false,
     arpMode: 'off',
@@ -506,7 +596,7 @@ function normalizeDrumPatterns(rawPatterns) {
 
 let song = createDefaultSong();
 let songVersion = 0;
-const synthPanelExpanded = { chord: true, bass: true };
+const synthPanelExpanded = { chord: true, bass: true, string: true };
 let editingDrumPatternId = null;
 let activePitchTarget = null;
 let activeLoopTarget = null;
@@ -534,7 +624,7 @@ function setActivePitchTarget(sectionId, chordId, kind = 'chord') {
   activePitchTarget = {
     sectionId,
     chordId,
-    kind: kind === 'bass' ? 'bass' : 'chord',
+    kind: kind === 'bass' ? 'bass' : kind === 'string' ? 'string' : 'chord',
   };
 }
 
@@ -553,7 +643,7 @@ function getActivePitchTarget() {
   return {
     sectionId: section.id,
     chordId: chord.id,
-    kind: activePitchTarget.kind === 'bass' ? 'bass' : 'chord',
+    kind: activePitchTarget.kind === 'bass' ? 'bass' : activePitchTarget.kind === 'string' ? 'string' : 'chord',
   };
 }
 
@@ -635,14 +725,19 @@ function normalizeChord(rawChord) {
   const chord = rawChord || {};
   const loopEnabled = chord.loopEnabled !== undefined ? chord.loopEnabled : chord.cycle;
   const arpMode = ARP_MODES.includes(chord.arpMode) ? chord.arpMode : 'off';
+  const normalizedRoot = normalizeSemitone(chord.root, 0);
+  const type = CHORD_TYPES.some(entry => entry.name === chord.type) ? chord.type : 'maj';
+  const defaultNoteCount = clampInt(chordTypeObj(type).intervals.length, 3, 1, 16);
   return {
     id: chord.id || makeId(),
-    root: normalizeSemitone(chord.root, 0),
-    bassRoot: normalizeSemitone(chord.bassRoot, normalizeSemitone(chord.root, 0)),
-    type: CHORD_TYPES.some(entry => entry.name === chord.type) ? chord.type : 'maj',
+    root: normalizedRoot,
+    bassRoot: normalizeSemitone(chord.bassRoot, normalizedRoot),
+    stringRoot: normalizeSemitone(chord.stringRoot, normalizedRoot),
+    type,
     beats: clampInt(chord.beats, 4, 1, 64),
     chordRepeat: normalizeRepeat(chord.chordRepeat, 1),
     bassRepeat: normalizeRepeat(chord.bassRepeat, 1),
+    noteCount: clampInt(chord.noteCount, defaultNoteCount, 1, 16),
     startBeat: normalizeStartBeat(chord.startBeat, 1),
     loopEnabled: Boolean(loopEnabled),
     arpMode,
@@ -689,6 +784,7 @@ function normalizeSong(rawSong) {
   const selectedSectionExists = sections.some(section => section.id === parsed.selectedSectionId);
   const chordSound = resolvePresetId('chord', parsed.chordSound || parsed.chordSynth?.preset || base.chordSound);
   const bassSound = resolvePresetId('bass', parsed.bassSound || parsed.bassSynth?.preset || base.bassSound);
+  const stringSound = resolvePresetId('string', parsed.stringSound || parsed.stringSynth?.preset || base.stringSound);
   const sectionIds = new Set(sections.map(section => section.id));
   const arranger = Array.isArray(parsed.arranger)
     ? parsed.arranger
@@ -708,21 +804,27 @@ function normalizeSong(rawSong) {
     playbackMode: PLAYBACK_MODES.includes(parsed.playbackMode) ? parsed.playbackMode : base.playbackMode,
     selectedSectionId: selectedSectionExists ? parsed.selectedSectionId : sections[0].id,
     bassPitchMode: BASS_PITCH_MODES.includes(parsed.bassPitchMode) ? parsed.bassPitchMode : base.bassPitchMode,
+    stringPitchMode: STRING_PITCH_MODES.includes(parsed.stringPitchMode) ? parsed.stringPitchMode : base.stringPitchMode,
     chordSound,
     chordSynth: normalizeSynthSettings('chord', parsed.chordSynth, chordSound),
     bassEnabled: parsed.bassEnabled === undefined ? base.bassEnabled : Boolean(parsed.bassEnabled),
     bassSound,
     bassSynth: normalizeSynthSettings('bass', parsed.bassSynth, bassSound),
+    stringEnabled: parsed.stringEnabled === undefined ? base.stringEnabled : Boolean(parsed.stringEnabled),
+    stringSound,
+    stringSynth: normalizeSynthSettings('string', parsed.stringSynth, stringSound),
     drumPatterns,
     mixer: {
       chordVolume: clampNumber(parsed.mixer?.chordVolume, base.mixer.chordVolume, 0, 1),
       bassVolume: clampNumber(parsed.mixer?.bassVolume, base.mixer.bassVolume, 0, 1),
+      stringVolume: clampNumber(parsed.mixer?.stringVolume, base.mixer.stringVolume, 0, 1),
       drumsVolume: clampNumber(parsed.mixer?.drumsVolume, base.mixer.drumsVolume, 0, 1),
       masterVolume: clampNumber(parsed.mixer?.masterVolume, base.mixer.masterVolume, 0, 1),
     },
     reverb: {
       chordWet: clampNumber(parsed.reverb?.chordWet, base.reverb.chordWet, 0, 1),
       bassWet: clampNumber(parsed.reverb?.bassWet, base.reverb.bassWet, 0, 1),
+      stringWet: clampNumber(parsed.reverb?.stringWet, base.reverb.stringWet, 0, 1),
     },
     arranger,
     sections,
@@ -794,6 +896,11 @@ function stepPitchBySectionScale(section, currentSemitone, direction) {
 function getChordBassRoot(chord) {
   if ((song.bassPitchMode || 'linked') !== 'free') return chord.root;
   return normalizeSemitone(chord.bassRoot, chord.root);
+}
+
+function getChordStringRoot(chord) {
+  if ((song.stringPitchMode || 'linked') !== 'free') return chord.root;
+  return normalizeSemitone(chord.stringRoot, chord.root);
 }
 
 function getChordPlaybackStartBeat(chord, beats = chord?.beats || 4) {
@@ -918,6 +1025,9 @@ function setSynthPreset(kind, presetId) {
   if (kind === 'bass') {
     song.bassSound = resolved;
     song.bassSynth = createSynthSettings('bass', resolved);
+  } else if (kind === 'string') {
+    song.stringSound = resolved;
+    song.stringSynth = createSynthSettings('string', resolved);
   } else {
     song.chordSound = resolved;
     song.chordSynth = createSynthSettings('chord', resolved);
@@ -937,20 +1047,32 @@ function setBassPitchMode(mode) {
   commitSong({ rerender: true, refreshCursor: true });
 }
 
+function setStringEnabled(enabled) {
+  song.stringEnabled = Boolean(enabled);
+  commitSong();
+}
+
+function setStringPitchMode(mode) {
+  if (!STRING_PITCH_MODES.includes(mode)) return;
+  song.stringPitchMode = mode;
+  commitSong({ rerender: true, refreshCursor: true });
+}
+
 function setSynthPanelExpanded(kind, expanded) {
-  if (kind !== 'chord' && kind !== 'bass') return;
+  if (kind !== 'chord' && kind !== 'bass' && kind !== 'string') return;
   synthPanelExpanded[kind] = Boolean(expanded);
   renderSynthRack();
 }
 
 function updateSynthField(kind, fieldKey, value) {
-  const synth = kind === 'bass' ? song.bassSynth : song.chordSynth;
+  const synth = kind === 'bass' ? song.bassSynth : kind === 'string' ? song.stringSynth : song.chordSynth;
   const field = SYNTH_UI_FIELDS.find(entry => entry.key === fieldKey);
   if (!synth || !field) return;
   const clamped = clampNumber(value, synth[fieldKey], field.min, field.max);
   synth[fieldKey] = field.step >= 1 ? Math.round(clamped) : clamped;
   synth.preset = 'custom';
   if (kind === 'bass') song.bassSound = 'custom';
+  else if (kind === 'string') song.stringSound = 'custom';
   else song.chordSound = 'custom';
   commitSong();
   const presetSelect = document.getElementById(`${kind}-preset-select`);
@@ -959,12 +1081,14 @@ function updateSynthField(kind, fieldKey, value) {
 
 function updateSynthWaveform(kind, fieldKey, value) {
   if (!OSC_TYPES.includes(value)) return;
-  if (fieldKey !== 'osc1Type' && fieldKey !== 'osc2Type') return;
-  const synth = kind === 'bass' ? song.bassSynth : song.chordSynth;
+  if (!['osc1Type', 'osc2Type', 'osc3Type', 'osc4Type'].includes(fieldKey)) return;
+  const synth = kind === 'bass' ? song.bassSynth : kind === 'string' ? song.stringSynth : song.chordSynth;
+  if ((fieldKey === 'osc3Type' || fieldKey === 'osc4Type') && kind !== 'string') return;
   if (!synth) return;
   synth[fieldKey] = value;
   synth.preset = 'custom';
   if (kind === 'bass') song.bassSound = 'custom';
+  else if (kind === 'string') song.stringSound = 'custom';
   else song.chordSound = 'custom';
   commitSong();
   renderSynthRack();
@@ -1037,6 +1161,12 @@ function updateBassRepeat(sectionId, chordId, repeat) {
   }, { refreshCursor: true });
 }
 
+function updateChordNoteCount(sectionId, chordId, noteCount) {
+  mutateChord(sectionId, chordId, chord => {
+    chord.noteCount = clampInt(noteCount, chord.noteCount || chordTypeObj(chord.type).intervals.length, 1, 16);
+  }, { refreshCursor: true });
+}
+
 function updateChordStartBeat(sectionId, chordId, startBeat) {
   mutateChord(sectionId, chordId, chord => {
     chord.startBeat = normalizeStartBeat(startBeat, chord.startBeat || 1);
@@ -1061,6 +1191,7 @@ function noteUp(sectionId, chordId) {
     const section = song.sections.find(entry => entry.id === sectionId);
     chord.root = stepPitchBySectionScale(section, chord.root, 1);
     if ((song.bassPitchMode || 'linked') !== 'free') chord.bassRoot = chord.root;
+    if ((song.stringPitchMode || 'linked') !== 'free') chord.stringRoot = chord.root;
   }, { rerender: true, refreshCursor: true });
 }
 
@@ -1070,6 +1201,7 @@ function noteDown(sectionId, chordId) {
     const section = song.sections.find(entry => entry.id === sectionId);
     chord.root = stepPitchBySectionScale(section, chord.root, -1);
     if ((song.bassPitchMode || 'linked') !== 'free') chord.bassRoot = chord.root;
+    if ((song.stringPitchMode || 'linked') !== 'free') chord.stringRoot = chord.root;
   }, { rerender: true, refreshCursor: true });
 }
 
@@ -1093,6 +1225,26 @@ function bassPitchDown(sectionId, chordId) {
   }, { rerender: true, refreshCursor: true });
 }
 
+function stringPitchUp(sectionId, chordId) {
+  setActivePitchTarget(sectionId, chordId, 'string');
+  mutateChord(sectionId, chordId, chord => {
+    if ((song.stringPitchMode || 'linked') !== 'free') return;
+    const section = song.sections.find(entry => entry.id === sectionId);
+    const currentString = getChordStringRoot(chord);
+    chord.stringRoot = stepPitchBySectionScale(section, currentString, 1);
+  }, { rerender: true, refreshCursor: true });
+}
+
+function stringPitchDown(sectionId, chordId) {
+  setActivePitchTarget(sectionId, chordId, 'string');
+  mutateChord(sectionId, chordId, chord => {
+    if ((song.stringPitchMode || 'linked') !== 'free') return;
+    const section = song.sections.find(entry => entry.id === sectionId);
+    const currentString = getChordStringRoot(chord);
+    chord.stringRoot = stepPitchBySectionScale(section, currentString, -1);
+  }, { rerender: true, refreshCursor: true });
+}
+
 function varUp(sectionId, chordId) {
   mutateChord(sectionId, chordId, chord => {
     const index = CHORD_TYPES.findIndex(entry => entry.name === chord.type);
@@ -1111,6 +1263,7 @@ function transposeChordUp(sectionId, chordId) {
   mutateChord(sectionId, chordId, chord => {
     chord.root += 1;
     if ((song.bassPitchMode || 'linked') !== 'free') chord.bassRoot = chord.root;
+    if ((song.stringPitchMode || 'linked') !== 'free') chord.stringRoot = chord.root;
   }, { rerender: true, refreshCursor: true });
 }
 
@@ -1118,6 +1271,7 @@ function transposeChordDown(sectionId, chordId) {
   mutateChord(sectionId, chordId, chord => {
     chord.root -= 1;
     if ((song.bassPitchMode || 'linked') !== 'free') chord.bassRoot = chord.root;
+    if ((song.stringPitchMode || 'linked') !== 'free') chord.stringRoot = chord.root;
   }, { rerender: true, refreshCursor: true });
 }
 
@@ -1127,7 +1281,9 @@ function transposeSong(steps) {
     section.chords.forEach(chord => {
       chord.root += steps;
       chord.bassRoot = normalizeSemitone(chord.bassRoot, chord.root - steps) + steps;
+      chord.stringRoot = normalizeSemitone(chord.stringRoot, chord.root - steps) + steps;
       if ((song.bassPitchMode || 'linked') !== 'free') chord.bassRoot = chord.root;
+      if ((song.stringPitchMode || 'linked') !== 'free') chord.stringRoot = chord.root;
     });
   });
   commitSong({ rerender: true, refreshCursor: true });
@@ -1150,7 +1306,7 @@ function updateMixerField(field, value) {
 
 function updateReverbWet(kind, value) {
   if (!song.reverb) return;
-  const key = kind === 'bass' ? 'bassWet' : 'chordWet';
+  const key = kind === 'bass' ? 'bassWet' : kind === 'string' ? 'stringWet' : 'chordWet';
   song.reverb[key] = clampNumber(value, song.reverb[key], 0, 1);
   commitSong();
 }
@@ -1525,6 +1681,7 @@ function setupAudioRouting() {
     master,
     chord: makeInstrumentBus(),
     bass: makeInstrumentBus(),
+    string: makeInstrumentBus(),
     drums: { input: drumsGain, output: drumsGain },
   };
   applyAudioMixSettings();
@@ -1548,6 +1705,7 @@ function applyAudioMixSettings() {
 
   setBus('chord', mixer.chordVolume, reverb.chordWet);
   setBus('bass', mixer.bassVolume, reverb.bassWet);
+  setBus('string', mixer.stringVolume, reverb.stringWet);
   if (audioRouting.drums) {
     audioRouting.drums.output.gain.value = clampNumber(mixer.drumsVolume, 0.9, 0, 1);
   }
@@ -1904,42 +2062,50 @@ function playSynthVoice(freq, time, duration, synthSettings, kind = 'chord') {
   }
   voiceGain.connect(audioRouting?.[kind]?.input || ctx.destination);
 
-  const osc1 = ctx.createOscillator();
-  const osc2 = ctx.createOscillator();
-  const mix1 = ctx.createGain();
-  const mix2 = ctx.createGain();
-
-  osc1.type = synthSettings.osc1Type;
-  osc2.type = synthSettings.osc2Type;
-  osc1.frequency.setValueAtTime(freq, time);
-  osc2.frequency.setValueAtTime(freq * Math.pow(2, (synthSettings.osc2Interval * 100 + synthSettings.detune) / 1200), time);
-  mix1.gain.value = Math.max(0.05, 1 - synthSettings.mix);
-  mix2.gain.value = Math.max(0.05, synthSettings.mix);
-
-  osc1.connect(mix1);
-  osc2.connect(mix2);
-  mix1.connect(filter);
-  mix2.connect(filter);
+  const isStringVoice = kind === 'string';
+  const oscConfigs = isStringVoice
+    ? [
+      { type: synthSettings.osc1Type, freqOffsetCents: 0, gain: Math.max(0.03, (1 - synthSettings.mix) * 0.5) },
+      { type: synthSettings.osc2Type, freqOffsetCents: synthSettings.osc2Interval * 100 + synthSettings.detune, gain: Math.max(0.03, synthSettings.mix * 0.5) },
+      { type: synthSettings.osc3Type || synthSettings.osc1Type, freqOffsetCents: 1200 + synthSettings.detune * 0.5, gain: Math.max(0.03, (1 - synthSettings.mix) * 0.42) },
+      { type: synthSettings.osc4Type || synthSettings.osc2Type, freqOffsetCents: 1200 + synthSettings.osc2Interval * 100 - synthSettings.detune * 0.5, gain: Math.max(0.03, synthSettings.mix * 0.42) },
+    ]
+    : [
+      { type: synthSettings.osc1Type, freqOffsetCents: 0, gain: Math.max(0.05, 1 - synthSettings.mix) },
+      { type: synthSettings.osc2Type, freqOffsetCents: synthSettings.osc2Interval * 100 + synthSettings.detune, gain: Math.max(0.05, synthSettings.mix) },
+    ];
+  const oscillators = [];
+  const mixGains = [];
+  const oscillatorFreqs = [];
+  oscConfigs.forEach(config => {
+    const oscillator = ctx.createOscillator();
+    const mixGain = ctx.createGain();
+    const oscillatorFreq = freq * Math.pow(2, config.freqOffsetCents / 1200);
+    oscillator.type = config.type;
+    oscillator.frequency.setValueAtTime(oscillatorFreq, time);
+    mixGain.gain.value = config.gain;
+    oscillator.connect(mixGain);
+    mixGain.connect(filter);
+    oscillators.push(oscillator);
+    mixGains.push(mixGain);
+    oscillatorFreqs.push(oscillatorFreq);
+  });
 
   const modRate = clampNumber(synthSettings.modRate, 0, 0, 12);
   const modDepth = clampNumber(synthSettings.modDepth, 0, 0, 80);
   let lfo = null;
-  let lfoGain1 = null;
-  let lfoGain2 = null;
+  const lfoGains = [];
   if (modRate > 0.01 && modDepth > 0.01) {
     lfo = ctx.createOscillator();
-    lfoGain1 = ctx.createGain();
-    lfoGain2 = ctx.createGain();
-    const depthHz1 = freq * (Math.pow(2, modDepth / 1200) - 1);
-    const freq2 = freq * Math.pow(2, (synthSettings.osc2Interval * 100 + synthSettings.detune) / 1200);
-    const depthHz2 = freq2 * (Math.pow(2, modDepth / 1200) - 1);
     lfo.frequency.setValueAtTime(modRate, time);
-    lfoGain1.gain.setValueAtTime(depthHz1, time);
-    lfoGain2.gain.setValueAtTime(depthHz2, time);
-    lfo.connect(lfoGain1);
-    lfo.connect(lfoGain2);
-    lfoGain1.connect(osc1.frequency);
-    lfoGain2.connect(osc2.frequency);
+    oscillators.forEach((oscillator, index) => {
+      const lfoGain = ctx.createGain();
+      const depthHz = oscillatorFreqs[index] * (Math.pow(2, modDepth / 1200) - 1);
+      lfoGain.gain.setValueAtTime(depthHz, time);
+      lfo.connect(lfoGain);
+      lfoGain.connect(oscillator.frequency);
+      lfoGains.push(lfoGain);
+    });
     lfo.start(time);
   }
 
@@ -1954,17 +2120,17 @@ function playSynthVoice(freq, time, duration, synthSettings, kind = 'chord') {
     duration,
   );
 
-  osc1.start(time);
-  osc2.start(time);
-  osc1.stop(noteEnd + 0.02);
-  osc2.stop(noteEnd + 0.02);
+  oscillators.forEach(oscillator => {
+    oscillator.start(time);
+    oscillator.stop(noteEnd + 0.02);
+  });
   if (lfo) lfo.stop(noteEnd + 0.02);
-  const sources = [osc1, osc2];
-  const nodes = [voiceGain, filter, osc1, osc2, mix1, mix2];
+  const sources = [...oscillators];
+  const nodes = [voiceGain, filter, ...oscillators, ...mixGains];
   if (shaper) nodes.push(shaper);
   if (lfo) {
     sources.push(lfo);
-    nodes.push(lfo, lfoGain1, lfoGain2);
+    nodes.push(lfo, ...lfoGains);
   }
   registerAudioNodeEntry(sources, nodes, 'voice');
 }
@@ -1978,22 +2144,71 @@ function buildArpStepPattern(noteCount, mode = 'off') {
     for (let index = noteCount - 2; index >= 1; index--) up.push(index);
     return up;
   }
+  if (mode === 'outsideIn') {
+    const pattern = [];
+    let low = 0;
+    let high = noteCount - 1;
+    while (low <= high) {
+      pattern.push(low);
+      if (high !== low) pattern.push(high);
+      low++;
+      high--;
+    }
+    return pattern;
+  }
+  if (mode === 'insideOut') {
+    const pattern = [];
+    const middleLow = Math.floor((noteCount - 1) / 2);
+    const middleHigh = Math.ceil((noteCount - 1) / 2);
+    if (middleHigh !== middleLow) pattern.push(middleLow, middleHigh);
+    else pattern.push(middleLow);
+    for (let offset = 1; pattern.length < noteCount; offset++) {
+      const left = middleLow - offset;
+      const right = middleHigh + offset;
+      if (right < noteCount) pattern.push(right);
+      if (left >= 0) pattern.push(left);
+    }
+    return pattern.slice(0, noteCount);
+  }
+  if (mode === 'upSkip') {
+    const evens = Array.from({ length: Math.ceil(noteCount / 2) }, (_, index) => index * 2).filter(index => index < noteCount);
+    const odds = Array.from({ length: Math.floor(noteCount / 2) }, (_, index) => index * 2 + 1).filter(index => index < noteCount);
+    return evens.concat(odds);
+  }
+  if (mode === 'downSkip') {
+    const upSkip = buildArpStepPattern(noteCount, 'upSkip');
+    return upSkip.reverse();
+  }
   return Array.from({ length: noteCount }, (_, index) => index);
 }
 
-function playChordNotes(rootSemitone, typeName, when, beats = 4, repeats = 1, startBeat = 1, arpMode = 'off') {
-  const chordType = chordTypeObj(typeName);
+function buildChordIntervals(typeName, noteCount) {
+  const baseIntervals = chordTypeObj(typeName).intervals.slice();
+  if (!baseIntervals.length) return [];
+  const count = clampInt(noteCount, baseIntervals.length, 1, 16);
+  const result = [];
+  let octave = 0;
+  while (result.length < count) {
+    for (let index = 0; index < baseIntervals.length && result.length < count; index++) {
+      result.push(baseIntervals[index] + octave * 12);
+    }
+    octave += 1;
+  }
+  return result;
+}
+
+function playChordNotes(rootSemitone, typeName, when, beats = 4, repeats = 1, startBeat = 1, arpMode = 'off', noteCount = 3) {
+  const intervals = buildChordIntervals(typeName, noteCount);
   const rootMidi = 60 + rootSemitone + getSynthTranspose(song.chordSynth);
   const totalBeats = clampInt(beats, 4, 1, 64);
   const repeatCount = normalizeRepeat(repeats, 1);
   const effectiveStartBeat = Math.min(totalBeats, normalizeStartBeat(startBeat, 1));
   const startOffsetBeats = effectiveStartBeat - 1;
   const activeBeats = Math.max(0.25, totalBeats - startOffsetBeats);
-  if (arpMode !== 'off' && chordType.intervals.length) {
-    const intervals = chordType.intervals;
+  if (arpMode !== 'off' && intervals.length) {
     const arpStepPattern = buildArpStepPattern(intervals.length, arpMode);
-    const noteCount = arpStepPattern.length;
-    if (!noteCount) return;
+    const stepCount = arpStepPattern.length;
+    if (!stepCount) return;
     // Arpeggio articulation is independent from chord looping mode.
     const stepBeats = 0.5;
     const stepSeconds = beatOffsetToSeconds(stepBeats);
@@ -2007,7 +2222,7 @@ function playChordNotes(rootSemitone, typeName, when, beats = 4, repeats = 1, st
       if (remaining <= 0.01) break;
       const actualDuration = Math.min(noteDuration, Math.max(0.04, remaining * 0.95));
       playSynthVoice(
-        frequencyFromMidi(rootMidi + intervals[arpStepPattern[step % noteCount]]),
+        frequencyFromMidi(rootMidi + intervals[arpStepPattern[step % stepCount]]),
         hitTime,
         actualDuration,
         song.chordSynth,
@@ -2022,7 +2237,7 @@ function playChordNotes(rootSemitone, typeName, when, beats = 4, repeats = 1, st
   const hitDuration = Math.max(0.1, beatsToSeconds(hitBeats) * 0.92);
   for (let hit = 0; hit < repeatCount; hit++) {
     const hitTime = when + beatOffsetToSeconds(startOffsetBeats + hit * hitBeats);
-    chordType.intervals.forEach(interval => {
+    intervals.forEach(interval => {
       playSynthVoice(
         frequencyFromMidi(rootMidi + interval),
         hitTime,
@@ -2046,6 +2261,31 @@ function playBassNote(rootSemitone, when, beats = 4, repeats = 1, startBeat = 1)
   for (let hit = 0; hit < repeatCount; hit++) {
     const hitTime = when + beatOffsetToSeconds(startOffsetBeats + hit * hitBeats);
     playSynthVoice(frequencyFromMidi(bassMidi), hitTime, hitDuration, song.bassSynth, 'bass');
+  }
+}
+
+function playStringNotes(rootSemitone, typeName, when, beats = 4, repeats = 1, startBeat = 1, noteCount = 3) {
+  const intervals = buildChordIntervals(typeName, noteCount);
+  if (!intervals.length) return;
+  const stringMidi = 48 + rootSemitone + getSynthTranspose(song.stringSynth);
+  const totalBeats = clampInt(beats, 4, 1, 64);
+  const repeatCount = normalizeRepeat(repeats, 1);
+  const effectiveStartBeat = Math.min(totalBeats, normalizeStartBeat(startBeat, 1));
+  const startOffsetBeats = effectiveStartBeat - 1;
+  const activeBeats = Math.max(0.25, totalBeats - startOffsetBeats);
+  const hitBeats = Math.max(0.25, activeBeats / repeatCount);
+  const hitDuration = Math.max(0.1, beatsToSeconds(hitBeats) * 0.92);
+  for (let hit = 0; hit < repeatCount; hit++) {
+    const hitTime = when + beatOffsetToSeconds(startOffsetBeats + hit * hitBeats);
+    intervals.forEach(interval => {
+      playSynthVoice(
+        frequencyFromMidi(stringMidi + interval),
+        hitTime,
+        hitDuration,
+        song.stringSynth,
+        'string',
+      );
+    });
   }
 }
 
@@ -2272,8 +2512,10 @@ function scheduleMusicalBeat(time) {
   if (playbackCursor.beatInSection === 0 && section.crashOnStart) playCrash(time);
   if (playbackCursor.beatInChord === 0) {
     const chordStartBeat = getChordPlaybackStartBeat(chord);
-    playChordNotes(chord.root, chord.type, time, chord.beats || 4, chord.chordRepeat || 1, chordStartBeat, chord.arpMode || 'off');
+    const chordNoteCount = clampInt(chord.noteCount, chordTypeObj(chord.type).intervals.length, 1, 16);
+    playChordNotes(chord.root, chord.type, time, chord.beats || 4, chord.chordRepeat || 1, chordStartBeat, chord.arpMode || 'off', chordNoteCount);
     if (song.bassEnabled) playBassNote(getChordBassRoot(chord), time, chord.beats || 4, chord.bassRepeat || 1, chordStartBeat);
+    if (song.stringEnabled) playStringNotes(getChordStringRoot(chord), chord.type, time, chord.beats || 4, chord.chordRepeat || 1, chordStartBeat, chordNoteCount);
   }
 
   const sectionBeats = getSectionBeatLength(section);
@@ -2520,13 +2762,14 @@ function renderMixerPanel() {
   title.textContent = 'Mixer';
   const help = document.createElement('p');
   help.className = 'mixer-help';
-  help.textContent = 'Balance chord, bass, and drum levels. Reverb wet/dry is per instrument in each synth card.';
+  help.textContent = 'Balance chord, bass, string, and drum levels. Reverb wet/dry is per instrument in each synth card.';
 
   const controls = document.createElement('div');
   controls.className = 'mixer-controls';
   controls.append(
     buildMixerSlider('Chords', song.mixer.chordVolume, value => updateMixerField('chordVolume', value)),
     buildMixerSlider('Bass', song.mixer.bassVolume, value => updateMixerField('bassVolume', value)),
+    buildMixerSlider('Strings', song.mixer.stringVolume, value => updateMixerField('stringVolume', value)),
     buildMixerSlider('Drums', song.mixer.drumsVolume, value => updateMixerField('drumsVolume', value)),
     buildMixerSlider('Output', song.mixer.masterVolume, value => updateMixerField('masterVolume', value)),
   );
@@ -2690,11 +2933,12 @@ function renderSynthRack() {
   rack.innerHTML = '';
   rack.appendChild(buildSynthCard('chord'));
   rack.appendChild(buildSynthCard('bass'));
+  rack.appendChild(buildSynthCard('string'));
 }
 
 function buildSynthCard(kind) {
-  const synth = kind === 'bass' ? song.bassSynth : song.chordSynth;
-  const presetOptions = kind === 'bass' ? BASS_SOUND_PRESETS : CHORD_SOUND_PRESETS;
+  const synth = kind === 'bass' ? song.bassSynth : kind === 'string' ? song.stringSynth : song.chordSynth;
+  const presetOptions = kind === 'bass' ? BASS_SOUND_PRESETS : kind === 'string' ? STRING_SOUND_PRESETS : CHORD_SOUND_PRESETS;
   const expanded = synthPanelExpanded[kind] !== false;
 
   const card = document.createElement('section');
@@ -2707,10 +2951,12 @@ function buildSynthCard(kind) {
   const titleWrap = document.createElement('div');
   titleWrap.className = 'synth-title-wrap';
   const title = document.createElement('h2');
-  title.textContent = kind === 'bass' ? 'Bass synth' : 'Chord synth';
+  title.textContent = kind === 'bass' ? 'Bass synth' : kind === 'string' ? 'String synth' : 'Chord synth';
   const subtitle = document.createElement('p');
   subtitle.className = 'synth-subtitle';
-  subtitle.textContent = '2 osc • transpose • ADSR • filter • drive • mod • tone • reverb';
+  subtitle.textContent = kind === 'string'
+    ? '4 osc • transpose • ADSR • filter • drive • mod • tone • reverb'
+    : '2 osc • transpose • ADSR • filter • drive • mod • tone • reverb';
   titleWrap.append(title, subtitle);
 
   const controls = document.createElement('div');
@@ -2771,6 +3017,35 @@ function buildSynthCard(kind) {
     pitchModeSelect.addEventListener('change', () => setBassPitchMode(pitchModeSelect.value));
     pitchModeLabel.append(pitchModeText, pitchModeSelect);
     controls.appendChild(pitchModeLabel);
+  } else if (kind === 'string') {
+    const stringToggle = document.createElement('label');
+    stringToggle.className = 'checkbox-inline synth-toggle';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = Boolean(song.stringEnabled);
+    checkbox.addEventListener('change', () => setStringEnabled(checkbox.checked));
+    stringToggle.append(checkbox, document.createTextNode('Enabled'));
+    controls.appendChild(stringToggle);
+
+    const pitchModeLabel = document.createElement('label');
+    pitchModeLabel.className = 'synth-select-row';
+    const pitchModeText = document.createElement('span');
+    pitchModeText.textContent = 'Pitch mode';
+    const pitchModeSelect = document.createElement('select');
+    pitchModeSelect.setAttribute('aria-label', 'String pitch mode');
+    [
+      { value: 'linked', label: 'Linked (follow chord)' },
+      { value: 'free', label: 'Free (independent string)' },
+    ].forEach(option => {
+      const element = document.createElement('option');
+      element.value = option.value;
+      element.textContent = option.label;
+      pitchModeSelect.appendChild(element);
+    });
+    pitchModeSelect.value = song.stringPitchMode || 'linked';
+    pitchModeSelect.addEventListener('change', () => setStringPitchMode(pitchModeSelect.value));
+    pitchModeLabel.append(pitchModeText, pitchModeSelect);
+    controls.appendChild(pitchModeLabel);
   }
 
   header.append(titleWrap, controls);
@@ -2802,6 +3077,22 @@ function buildSynthCard(kind) {
       `${kind} oscillator 2 waveform`,
       value => updateSynthWaveform(kind, 'osc2Type', value),
     ));
+    if (kind === 'string') {
+      controlsGrid.appendChild(buildSynthSelectControl(
+        'Osc 3 Wave',
+        synth.osc3Type,
+        OSC_TYPES,
+        'string oscillator 3 waveform',
+        value => updateSynthWaveform(kind, 'osc3Type', value),
+      ));
+      controlsGrid.appendChild(buildSynthSelectControl(
+        'Osc 4 Wave',
+        synth.osc4Type,
+        OSC_TYPES,
+        'string oscillator 4 waveform',
+        value => updateSynthWaveform(kind, 'osc4Type', value),
+      ));
+    }
     SYNTH_UI_FIELDS.forEach(field => controlsGrid.appendChild(buildSynthSlider(kind, synth, field)));
     controlsGrid.appendChild(buildReverbSlider(kind));
 
@@ -2834,7 +3125,7 @@ function buildSynthSelectControl(labelText, currentValue, options, ariaLabel, on
 }
 
 function buildReverbSlider(kind) {
-  const key = kind === 'bass' ? 'bassWet' : 'chordWet';
+  const key = kind === 'bass' ? 'bassWet' : kind === 'string' ? 'stringWet' : 'chordWet';
   const row = document.createElement('label');
   row.className = 'synth-slider';
 
@@ -2944,11 +3235,14 @@ function updateChordCard(sectionId, chordId) {
   const offsetElement = document.getElementById('root-offset-' + chordId);
   const bassRootElement = document.getElementById('bass-root-' + chordId);
   const bassOffsetElement = document.getElementById('bass-offset-' + chordId);
+  const stringRootElement = document.getElementById('string-root-' + chordId);
+  const stringOffsetElement = document.getElementById('string-offset-' + chordId);
   const qualityElement = document.getElementById('qual-' + chordId);
   const beatsElement = document.getElementById('beats-' + chordId);
   const startBeatElement = document.getElementById('start-beat-' + chordId);
   const chordRepeatElement = document.getElementById('chord-repeat-' + chordId);
   const bassRepeatElement = document.getElementById('bass-repeat-' + chordId);
+  const noteCountElement = document.getElementById('note-count-' + chordId);
   const loopEnabledElement = document.getElementById('loop-enabled-' + chordId);
   const arpModeElement = document.getElementById('arp-mode-' + chordId);
   if (rootElement) rootElement.textContent = noteName(chord.root);
@@ -2962,6 +3256,12 @@ function updateChordCard(sectionId, chordId) {
     const offset = formatPitchOffset(bassRoot);
     bassOffsetElement.textContent = offset || 'Base';
   }
+  const stringRoot = getChordStringRoot(chord);
+  if (stringRootElement) stringRootElement.textContent = `String ${noteName(stringRoot)}`;
+  if (stringOffsetElement) {
+    const offset = formatPitchOffset(stringRoot);
+    stringOffsetElement.textContent = offset || 'Base';
+  }
   if (qualityElement) {
     qualityElement.textContent = chord.type;
     qualityElement.title = chordTypeObj(chord.type).label;
@@ -2970,6 +3270,7 @@ function updateChordCard(sectionId, chordId) {
   if (startBeatElement) startBeatElement.value = String(normalizeStartBeat(chord.startBeat, 1));
   if (chordRepeatElement) chordRepeatElement.value = String(chord.chordRepeat || 1);
   if (bassRepeatElement) bassRepeatElement.value = String(chord.bassRepeat || 1);
+  if (noteCountElement) noteCountElement.value = String(clampInt(chord.noteCount, chordTypeObj(chord.type).intervals.length, 1, 16));
   if (loopEnabledElement) loopEnabledElement.checked = Boolean(chord.loopEnabled);
   if (arpModeElement) arpModeElement.value = ARP_MODES.includes(chord.arpMode) ? chord.arpMode : 'off';
 }
@@ -3255,8 +3556,12 @@ function focusNoteEditorForChord(sectionId, chordId, kind) {
   if (!card) return;
   const selector = kind === 'bass'
     ? '.ctrl-row[data-note-editor-kind="bass"] .arrow-btn:not(:disabled)'
+    : kind === 'string'
+      ? '.ctrl-row[data-note-editor-kind="string"] .arrow-btn:not(:disabled)'
     : '.ctrl-row[data-note-editor-kind="chord"] .arrow-btn:not(:disabled)';
-  const target = card.querySelector(selector) || document.getElementById(kind === 'bass' ? 'bass-preset-select' : 'chord-preset-select');
+  const target = card.querySelector(selector) || document.getElementById(
+    kind === 'bass' ? 'bass-preset-select' : kind === 'string' ? 'string-preset-select' : 'chord-preset-select',
+  );
   if (target && typeof target.focus === 'function') target.focus();
 }
 
@@ -3271,6 +3576,11 @@ function handlePitchArrowKey(event) {
   if (target.kind === 'bass') {
     if (event.key === 'ArrowUp') bassPitchUp(target.sectionId, target.chordId);
     else bassPitchDown(target.sectionId, target.chordId);
+    return;
+  }
+  if (target.kind === 'string') {
+    if (event.key === 'ArrowUp') stringPitchUp(target.sectionId, target.chordId);
+    else stringPitchDown(target.sectionId, target.chordId);
     return;
   }
   if (event.key === 'ArrowUp') noteUp(target.sectionId, target.chordId);
@@ -3306,6 +3616,10 @@ function buildChordCard(chord, sectionId) {
       setActivePitchTarget(sectionId, chord.id, 'bass');
       return;
     }
+    if (event.target?.closest?.('.ctrl-row[data-note-editor-kind="string"]')) {
+      setActivePitchTarget(sectionId, chord.id, 'string');
+      return;
+    }
     setActivePitchTarget(sectionId, chord.id, 'chord');
   });
 
@@ -3330,6 +3644,17 @@ function buildChordCard(chord, sectionId) {
   bassOffsetElement.id = 'bass-offset-' + chord.id;
   bassOffsetElement.textContent = formatPitchOffset(bassRoot) || 'Base';
 
+  const stringRoot = getChordStringRoot(chord);
+  const stringRootElement = document.createElement('div');
+  stringRootElement.className = 'chord-bass-root';
+  stringRootElement.id = 'string-root-' + chord.id;
+  stringRootElement.textContent = `String ${noteName(stringRoot)}`;
+
+  const stringOffsetElement = document.createElement('div');
+  stringOffsetElement.className = 'chord-bass-offset';
+  stringOffsetElement.id = 'string-offset-' + chord.id;
+  stringOffsetElement.textContent = formatPitchOffset(stringRoot) || 'Base';
+
   const qualityElement = document.createElement('div');
   qualityElement.className = 'chord-qual';
   qualityElement.id = 'qual-' + chord.id;
@@ -3348,10 +3673,26 @@ function buildChordCard(chord, sectionId) {
     () => bassPitchDown(sectionId, chord.id),
     'Bass note up',
     'Bass note down',
-    { disabled: (song.bassPitchMode || 'linked') !== 'free' },
+    {
+      disabled: (song.bassPitchMode || 'linked') !== 'free',
+      disabledTitle: 'Enable Free bass mode to adjust bass pitch',
+    },
   );
   bassRow.dataset.noteEditorKind = 'bass';
   bassRow.addEventListener('click', () => focusNoteEditorForChord(sectionId, chord.id, 'bass'));
+  const stringRow = buildCtrlRow(
+    'String',
+    () => stringPitchUp(sectionId, chord.id),
+    () => stringPitchDown(sectionId, chord.id),
+    'String note up',
+    'String note down',
+    {
+      disabled: (song.stringPitchMode || 'linked') !== 'free',
+      disabledTitle: 'Enable Free string mode to adjust string pitch',
+    },
+  );
+  stringRow.dataset.noteEditorKind = 'string';
+  stringRow.addEventListener('click', () => focusNoteEditorForChord(sectionId, chord.id, 'string'));
   const typeRow = buildCtrlRow('Type', () => varUp(sectionId, chord.id), () => varDown(sectionId, chord.id), 'Chord type up', 'Chord type down');
   const transposeRow = buildCtrlRow('Xpose', () => transposeChordUp(sectionId, chord.id), () => transposeChordDown(sectionId, chord.id), 'Transpose up', 'Transpose down');
 
@@ -3394,6 +3735,25 @@ function buildChordCard(chord, sectionId) {
   });
   startBeatSelect.addEventListener('change', () => updateChordStartBeat(sectionId, chord.id, startBeatSelect.value));
   startBeatRow.append(startBeatLabel, startBeatSelect);
+
+  const noteCountRow = document.createElement('div');
+  noteCountRow.className = 'beats-row';
+  const noteCountLabel = document.createElement('label');
+  noteCountLabel.textContent = 'Notes';
+  noteCountLabel.setAttribute('for', 'note-count-' + chord.id);
+  const noteCountSelect = document.createElement('select');
+  noteCountSelect.id = 'note-count-' + chord.id;
+  noteCountSelect.className = 'repeat-select';
+  noteCountSelect.setAttribute('aria-label', 'Chord note count');
+  CHORD_NOTE_COUNT_OPTIONS.forEach(value => {
+    const option = document.createElement('option');
+    option.value = String(value);
+    option.textContent = String(value);
+    if (value === clampInt(chord.noteCount, chordTypeObj(chord.type).intervals.length, 1, 16)) option.selected = true;
+    noteCountSelect.appendChild(option);
+  });
+  noteCountSelect.addEventListener('change', () => updateChordNoteCount(sectionId, chord.id, noteCountSelect.value));
+  noteCountRow.append(noteCountLabel, noteCountSelect);
 
   const repeatRow = document.createElement('div');
   repeatRow.className = 'repeat-row';
@@ -3459,12 +3819,7 @@ function buildChordCard(chord, sectionId) {
   const arpModeSelect = document.createElement('select');
   arpModeSelect.id = 'arp-mode-' + chord.id;
   arpModeSelect.className = 'repeat-select';
-  [
-    { value: 'off', text: 'Off' },
-    { value: 'up', text: 'Up' },
-    { value: 'down', text: 'Down' },
-    { value: 'upDown', text: 'Up and down' },
-  ].forEach(optionConfig => {
+  ARP_MODE_OPTIONS.forEach(optionConfig => {
     const option = document.createElement('option');
     option.value = optionConfig.value;
     option.textContent = optionConfig.text;
@@ -3494,7 +3849,28 @@ function buildChordCard(chord, sectionId) {
   removeButton.addEventListener('click', () => removeChord(sectionId, chord.id));
 
   actionBar.append(auditionButton, removeButton);
-  card.append(rootElement, offsetElement, bassRootElement, bassOffsetElement, qualityElement, divider1, noteRow, bassRow, typeRow, transposeRow, divider2, beatsRow, startBeatRow, repeatRow, articulationRow, actionBar);
+  card.append(
+    rootElement,
+    offsetElement,
+    bassRootElement,
+    bassOffsetElement,
+    stringRootElement,
+    stringOffsetElement,
+    qualityElement,
+    divider1,
+    noteRow,
+    bassRow,
+    stringRow,
+    typeRow,
+    transposeRow,
+    divider2,
+    beatsRow,
+    startBeatRow,
+    noteCountRow,
+    repeatRow,
+    articulationRow,
+    actionBar,
+  );
   return card;
 }
 
@@ -3513,7 +3889,7 @@ function buildCtrlRow(labelText, onUp, onDown, upTitle, downTitle, options = {})
   upButton.setAttribute('aria-label', upTitle);
   if (options.disabled) {
     upButton.disabled = true;
-    upButton.title = 'Enable Free bass mode to adjust bass pitch';
+    upButton.title = options.disabledTitle || 'Control unavailable';
   }
   upButton.addEventListener('click', onUp);
 
@@ -3524,7 +3900,7 @@ function buildCtrlRow(labelText, onUp, onDown, upTitle, downTitle, options = {})
   downButton.setAttribute('aria-label', downTitle);
   if (options.disabled) {
     downButton.disabled = true;
-    downButton.title = 'Enable Free bass mode to adjust bass pitch';
+    downButton.title = options.disabledTitle || 'Control unavailable';
   }
   downButton.addEventListener('click', onDown);
 
