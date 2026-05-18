@@ -125,6 +125,27 @@ const DRUM_PRESET_NAMES = [
   'Pattern 4', 'Pattern 5', 'Pattern 6', 'Pattern 7', 'Pattern 8', 'Pattern 9', 'Pattern 10',
 ];
 
+const LFO_PATTERN_COUNT = 10;
+const LFO_SHAPE_OPTIONS = [
+  { value: 'sine', label: 'Sine' },
+  { value: 'triangle', label: 'Triangle' },
+  { value: 'down', label: 'Ramp Down' },
+  { value: 'up', label: 'Ramp Up' },
+  { value: 'square', label: 'Gate' },
+  { value: 'pump', label: 'Pump' },
+];
+const LFO_RATE_OPTIONS = [
+  { value: 0.25, label: '1/16' },
+  { value: 0.5, label: '1/8' },
+  { value: 1, label: '1/4' },
+  { value: 2, label: '1/2' },
+  { value: 4, label: '1 bar' },
+];
+const LFO_PRESET_NAMES = [
+  'LFO Off', 'Pump 1/4', 'Gate 1/8',
+  'Pattern 4', 'Pattern 5', 'Pattern 6', 'Pattern 7', 'Pattern 8', 'Pattern 9', 'Pattern 10',
+];
+
 const SYNTH_PRESET_LIBRARY = {
   chord: {
     warmPad: {
@@ -515,7 +536,7 @@ function normalizeSynthSettings(kind, rawSynth, legacyPreset) {
   return normalized;
 }
 
-function createSection(type, drumPatternId = null) {
+function createSection(type, drumPatternId = null, lfoPatternId = null) {
   const defaults = SECTION_DEFAULTS[type] || [];
   return {
     id: makeId(),
@@ -525,18 +546,20 @@ function createSection(type, drumPatternId = null) {
     scaleType: 'Major',
     crashOnStart: false,
     rollAtEnd: false,
-    chords: defaults.map(chord => createChord(chord.root - 12, chord.type, drumPatternId)),
+    chords: defaults.map(chord => createChord(chord.root - 12, chord.type, drumPatternId, lfoPatternId)),
   };
 }
 
 function createDefaultSong() {
   const now = Date.now();
   const drumPatterns = Array.from({ length: DRUM_PATTERN_COUNT }, (_, i) => createDefaultDrumPattern(i));
+  const lfoPatterns = Array.from({ length: LFO_PATTERN_COUNT }, (_, i) => createDefaultLfoPattern(i));
   const defaultPatternId = drumPatterns[0].id;
+  const defaultLfoPatternId = lfoPatterns[0].id;
   const sections = [
-    createSection('Verse', defaultPatternId),
-    createSection('Chorus', defaultPatternId),
-    createSection('Bridge', defaultPatternId),
+    createSection('Verse', defaultPatternId, defaultLfoPatternId),
+    createSection('Chorus', defaultPatternId, defaultLfoPatternId),
+    createSection('Bridge', defaultPatternId, defaultLfoPatternId),
   ];
   return {
     id: makeId(),
@@ -556,6 +579,7 @@ function createDefaultSong() {
     stringSound: 'lushStrings',
     stringSynth: createSynthSettings('string', 'lushStrings'),
     drumPatterns,
+    lfoPatterns,
     mixer: {
       chordVolume: 0.9,
       bassVolume: 0.9,
@@ -582,7 +606,7 @@ function normalizeStartBeat(value, fallback = 1) {
   return clampInt(value, fallback, 1, 4);
 }
 
-function createChord(root = DEFAULT_CHORD_ROOT, type = 'maj', drumPatternId = null) {
+function createChord(root = DEFAULT_CHORD_ROOT, type = 'maj', drumPatternId = null, lfoPatternId = null) {
   const normalizedRoot = normalizeSemitone(root, DEFAULT_CHORD_ROOT);
   const normalizedType = CHORD_TYPES.some(entry => entry.name === type) ? type : 'maj';
   return {
@@ -600,6 +624,7 @@ function createChord(root = DEFAULT_CHORD_ROOT, type = 'maj', drumPatternId = nu
     loopEnabled: false,
     arpMode: 'off',
     drumPatternId,
+    lfoPatternId,
   };
 }
 
@@ -619,6 +644,19 @@ function createDefaultDrumPattern(index) {
     id: makeId(),
     name: DRUM_PRESET_NAMES[index] || `Pattern ${index + 1}`,
     grid,
+  };
+}
+
+function createDefaultLfoPattern(index) {
+  const defaults = index === 1
+    ? { enabled: true, depth: 1, rateBeats: 1, shape: 'pump', smoothing: 0.18, phase: 0 }
+    : index === 2
+      ? { enabled: true, depth: 0.72, rateBeats: 0.5, shape: 'square', smoothing: 0.04, phase: 0 }
+      : { enabled: false, depth: 0.85, rateBeats: 1, shape: 'sine', smoothing: 0.08, phase: 0 };
+  return {
+    id: makeId(),
+    name: LFO_PRESET_NAMES[index] || `Pattern ${index + 1}`,
+    ...defaults,
   };
 }
 
@@ -646,6 +684,40 @@ function normalizeDrumPatterns(rawPatterns) {
   return result;
 }
 
+function normalizeLfoRate(value, fallback = 1) {
+  const allowed = LFO_RATE_OPTIONS.map(option => option.value);
+  const parsed = clampNumber(value, fallback, 0.25, 4);
+  return allowed.includes(parsed) ? parsed : fallback;
+}
+
+function normalizeLfoShape(value, fallback = 'sine') {
+  const valid = LFO_SHAPE_OPTIONS.map(option => option.value);
+  return valid.includes(value) ? value : fallback;
+}
+
+function normalizeLfoPattern(raw, index = 0) {
+  const fallback = createDefaultLfoPattern(index);
+  return {
+    id: typeof raw?.id === 'string' && raw.id.trim() ? raw.id : makeId(),
+    name: typeof raw?.name === 'string' && raw.name.trim() ? raw.name.trim() : fallback.name,
+    enabled: Boolean(raw?.enabled),
+    depth: clampNumber(raw?.depth, fallback.depth, 0, 1),
+    rateBeats: normalizeLfoRate(raw?.rateBeats, fallback.rateBeats),
+    shape: normalizeLfoShape(raw?.shape, fallback.shape),
+    smoothing: clampNumber(raw?.smoothing, fallback.smoothing, 0, 1),
+    phase: clampNumber(raw?.phase, fallback.phase, 0, 0.999),
+  };
+}
+
+function normalizeLfoPatterns(rawPatterns) {
+  const result = [];
+  for (let i = 0; i < LFO_PATTERN_COUNT; i++) {
+    const raw = Array.isArray(rawPatterns) ? rawPatterns[i] : null;
+    result.push(normalizeLfoPattern(raw, i));
+  }
+  return result;
+}
+
 // =====================================================================
 // STATE – Song data model
 // =====================================================================
@@ -654,8 +726,10 @@ let song = createDefaultSong();
 let songVersion = 0;
 const synthPanelExpanded = { chord: true, bass: true, string: true };
 let editingDrumPatternId = null;
+let editingLfoPatternId = null;
 let copiedChordConfig = null;
 let copiedDrumPatternConfig = null;
+let copiedLfoPatternConfig = null;
 let activePitchTarget = null;
 let activeLoopTarget = null;
 let debugPanelOpen = false;
@@ -737,8 +811,17 @@ function getDefaultDrumPatternId() {
   return song.drumPatterns?.[0]?.id || null;
 }
 
+function getDefaultLfoPatternId() {
+  return song.lfoPatterns?.[0]?.id || null;
+}
+
 function getValidDrumPatternId(patternId, fallback = getDefaultDrumPatternId()) {
   if (song.drumPatterns?.some(pattern => pattern.id === patternId)) return patternId;
+  return fallback;
+}
+
+function getValidLfoPatternId(patternId, fallback = getDefaultLfoPatternId()) {
+  if (song.lfoPatterns?.some(pattern => pattern.id === patternId)) return patternId;
   return fallback;
 }
 
@@ -749,8 +832,19 @@ function getDrumPatternById(patternId) {
   return patterns.find(pattern => pattern.id === resolvedId) || patterns[0];
 }
 
+function getLfoPatternById(patternId) {
+  const patterns = song.lfoPatterns || [];
+  if (!patterns.length) return null;
+  const resolvedId = getValidLfoPatternId(patternId, patterns[0].id);
+  return patterns.find(pattern => pattern.id === resolvedId) || patterns[0];
+}
+
 function getChordDrumPatternId(chord, fallback = getDefaultDrumPatternId()) {
   return getValidDrumPatternId(chord?.drumPatternId, fallback);
+}
+
+function getChordLfoPatternId(chord, fallback = getDefaultLfoPatternId()) {
+  return getValidLfoPatternId(chord?.lfoPatternId, fallback);
 }
 
 function refreshDrumPatternOptionLabels(patternId, name) {
@@ -759,9 +853,15 @@ function refreshDrumPatternOptionLabels(patternId, name) {
   });
 }
 
+function refreshLfoPatternOptionLabels(patternId, name) {
+  document.querySelectorAll(`option[value="${patternId}"]`).forEach(option => {
+    option.textContent = name;
+  });
+}
+
 function cloneChordForClipboard(chord) {
   if (!chord) return null;
-  const { id, drumPatternId, ...copied } = normalizeChord(chord, getDefaultDrumPatternId());
+  const { id, drumPatternId, lfoPatternId, ...copied } = normalizeChord(chord, getDefaultDrumPatternId(), getDefaultLfoPatternId());
   return deepClone(copied);
 }
 
@@ -771,6 +871,12 @@ function cloneDrumPatternForClipboard(pattern) {
     name: pattern.name,
     grid: pattern.grid,
   });
+}
+
+function cloneLfoPatternForClipboard(pattern) {
+  if (!pattern) return null;
+  const { id, ...copied } = normalizeLfoPattern(pattern);
+  return deepClone(copied);
 }
 
 function getPreferredEditingChord(section) {
@@ -792,6 +898,12 @@ function getPreferredEditingDrumPatternId() {
   const selectedSection = song.sections.find(section => section.id === song.selectedSectionId) || song.sections[0];
   const preferredChord = getPreferredEditingChord(selectedSection);
   return getChordDrumPatternId(preferredChord, getDefaultDrumPatternId());
+}
+
+function getPreferredEditingLfoPatternId() {
+  const selectedSection = song.sections.find(section => section.id === song.selectedSectionId) || song.sections[0];
+  const preferredChord = getPreferredEditingChord(selectedSection);
+  return getChordLfoPatternId(preferredChord, getDefaultLfoPatternId());
 }
 
 function setPlaybackCursorFromPoint(point, songBeatIndex) {
@@ -840,7 +952,7 @@ function setActiveLoopTarget(sectionId, chordId, { retargetPlayback = false } = 
   if (mode === 'looping') movePlaybackToActiveLoopTarget({ rescheduleAudio: retargetPlayback && isBeating });
 }
 
-function normalizeChord(rawChord, fallbackDrumPatternId = null) {
+function normalizeChord(rawChord, fallbackDrumPatternId = null, fallbackLfoPatternId = null) {
   const chord = rawChord || {};
   const loopEnabled = chord.loopEnabled !== undefined ? chord.loopEnabled : chord.cycle;
   const arpMode = ARP_MODES.includes(chord.arpMode) ? chord.arpMode : 'off';
@@ -865,10 +977,13 @@ function normalizeChord(rawChord, fallbackDrumPatternId = null) {
     drumPatternId: typeof chord.drumPatternId === 'string' && chord.drumPatternId.trim()
       ? chord.drumPatternId
       : fallbackDrumPatternId,
+    lfoPatternId: typeof chord.lfoPatternId === 'string' && chord.lfoPatternId.trim()
+      ? chord.lfoPatternId
+      : fallbackLfoPatternId,
   };
 }
 
-function normalizeSection(rawSection, fallbackType = 'Custom', fallbackDrumPatternId = null) {
+function normalizeSection(rawSection, fallbackType = 'Custom', fallbackDrumPatternId = null, fallbackLfoPatternId = null) {
   const section = rawSection || {};
   const type = SECTION_TYPES.includes(section.type) ? section.type : fallbackType;
   return {
@@ -880,7 +995,7 @@ function normalizeSection(rawSection, fallbackType = 'Custom', fallbackDrumPatte
     crashOnStart: Boolean(section.crashOnStart),
     rollAtEnd: Boolean(section.rollAtEnd),
     chords: (Array.isArray(section.chords) ? section.chords : [])
-      .map(chord => normalizeChord(chord, fallbackDrumPatternId)),
+      .map(chord => normalizeChord(chord, fallbackDrumPatternId, fallbackLfoPatternId)),
   };
 }
 
@@ -891,23 +1006,30 @@ function normalizeSong(rawSong) {
   const drumPatterns = normalizeDrumPatterns(parsed.drumPatterns);
   const validPatternIds = new Set(drumPatterns.map(p => p.id));
   const defaultPatternId = drumPatterns[0].id;
+  const lfoPatterns = normalizeLfoPatterns(parsed.lfoPatterns);
+  const validLfoPatternIds = new Set(lfoPatterns.map(pattern => pattern.id));
+  const defaultLfoPatternId = lfoPatterns[0].id;
 
   const sections = (Array.isArray(parsed.sections) ? parsed.sections : base.sections)
     .map(section => {
       const legacyPatternId = validPatternIds.has(section?.drumPatternId)
         ? section.drumPatternId
         : defaultPatternId;
-      const normalized = normalizeSection(section, section?.type, legacyPatternId);
+      const legacyLfoPatternId = validLfoPatternIds.has(section?.lfoPatternId)
+        ? section.lfoPatternId
+        : defaultLfoPatternId;
+      const normalized = normalizeSection(section, section?.type, legacyPatternId, legacyLfoPatternId);
       return {
         ...normalized,
         chords: normalized.chords.map(chord => ({
           ...chord,
           drumPatternId: validPatternIds.has(chord.drumPatternId) ? chord.drumPatternId : legacyPatternId,
+          lfoPatternId: validLfoPatternIds.has(chord.lfoPatternId) ? chord.lfoPatternId : legacyLfoPatternId,
         })),
       };
     });
   if (sections.length === 0) {
-    const defaultSection = createSection('Verse', defaultPatternId);
+    const defaultSection = createSection('Verse', defaultPatternId, defaultLfoPatternId);
     sections.push(defaultSection);
   }
   const selectedSectionExists = sections.some(section => section.id === parsed.selectedSectionId);
@@ -943,6 +1065,7 @@ function normalizeSong(rawSong) {
     stringSound,
     stringSynth: normalizeSynthSettings('string', parsed.stringSynth, stringSound),
     drumPatterns,
+    lfoPatterns,
     mixer: {
       chordVolume: clampNumber(parsed.mixer?.chordVolume, base.mixer.chordVolume, 0, 1),
       bassVolume: clampNumber(parsed.mixer?.bassVolume, base.mixer.bassVolume, 0, 1),
@@ -1058,20 +1181,23 @@ function commitSong({
   refreshCursor = false,
   flushNoteBuffer = false,
   snapToChordStart = false,
+  preserveDrumPhase = false,
 } = {}) {
   songVersion += 1;
   saveSong();
   applyAudioMixSettings();
-  const shouldRefreshCursor = refreshCursor && isBeating;
+  const shouldRefreshCursor = refreshCursor && isBeating && !preserveDrumPhase;
   if (shouldRefreshCursor) initializePlaybackCursor();
   if (flushNoteBuffer || shouldRefreshCursor) {
     flushScheduledNotes({
       restartPlayback: isBeating,
       snapToChordStart: snapToChordStart || shouldRefreshCursor,
+      preserveDrumPhase,
+      clearDrumNodes: !preserveDrumPhase,
     });
   }
   if (rerender) {
-    render();
+    render({ preservePlaybackCursor: preserveDrumPhase });
     return;
   }
   updateSongGoToControl();
@@ -1083,7 +1209,7 @@ function handleSchedulingParameterChange({ rerender = false, refreshCursor = fal
     rerender,
     refreshCursor,
     flushNoteBuffer: true,
-    snapToChordStart: true,
+    preserveDrumPhase: true,
   });
 }
 
@@ -1111,7 +1237,7 @@ function snapPlaybackCursorToChordStart() {
 }
 
 function addSection(type) {
-  const section = createSection(type, getDefaultDrumPatternId());
+  const section = createSection(type, getDefaultDrumPatternId(), getDefaultLfoPatternId());
   song.sections.push(section);
   if (!song.selectedSectionId) song.selectedSectionId = section.id;
   commitSong({ rerender: true, refreshCursor: true });
@@ -1171,10 +1297,12 @@ function selectEditSection(sectionId) {
   if (!song.sections.some(section => section.id === sectionId)) return;
   song.selectedSectionId = sectionId;
   editingDrumPatternId = getPreferredEditingDrumPatternId();
+  editingLfoPatternId = getPreferredEditingLfoPatternId();
   commitSong();
   updatePlaybackModeUI();
   updatePlaybackHighlights();
   renderDrumSequencer();
+  renderSynthRack();
   if (isBeating && song.playbackMode === 'edit') {
     initializePlaybackCursor();
     flushScheduledNotes({ restartPlayback: true });
@@ -1215,24 +1343,24 @@ function setSynthPreset(kind, presetId) {
 
 function setBassEnabled(enabled) {
   song.bassEnabled = Boolean(enabled);
-  commitSong({ flushNoteBuffer: true, snapToChordStart: true });
+  commitSong({ flushNoteBuffer: true, preserveDrumPhase: true });
 }
 
 function setBassPitchMode(mode) {
   if (!BASS_PITCH_MODES.includes(mode)) return;
   song.bassPitchMode = mode;
-  commitSong({ rerender: true, refreshCursor: true, flushNoteBuffer: true });
+  commitSong({ rerender: true, refreshCursor: true, flushNoteBuffer: true, preserveDrumPhase: true });
 }
 
 function setStringEnabled(enabled) {
   song.stringEnabled = Boolean(enabled);
-  commitSong({ flushNoteBuffer: true, snapToChordStart: true });
+  commitSong({ flushNoteBuffer: true, preserveDrumPhase: true });
 }
 
 function setStringPitchMode(mode) {
   if (!STRING_PITCH_MODES.includes(mode)) return;
   song.stringPitchMode = mode;
-  commitSong({ rerender: true, refreshCursor: true, flushNoteBuffer: true });
+  commitSong({ rerender: true, refreshCursor: true, flushNoteBuffer: true, preserveDrumPhase: true });
 }
 
 function setSynthPanelExpanded(kind, expanded) {
@@ -1301,7 +1429,8 @@ function addChord(sectionId) {
   const section = song.sections.find(entry => entry.id === sectionId);
   if (!section) return;
   const inheritedPatternId = getChordDrumPatternId(section.chords[section.chords.length - 1], getDefaultDrumPatternId());
-  section.chords.push(createChord(DEFAULT_CHORD_ROOT, 'maj', inheritedPatternId));
+  const inheritedLfoPatternId = getChordLfoPatternId(section.chords[section.chords.length - 1], getDefaultLfoPatternId());
+  section.chords.push(createChord(DEFAULT_CHORD_ROOT, 'maj', inheritedPatternId, inheritedLfoPatternId));
   commitSong({ rerender: true, refreshCursor: true });
 }
 
@@ -1496,7 +1625,7 @@ function transposeSong(steps) {
       if ((song.stringPitchMode || 'linked') !== 'free') chord.stringRoot = chord.root;
     });
   });
-  commitSong({ rerender: true, refreshCursor: true, flushNoteBuffer: true });
+  commitSong({ rerender: true, refreshCursor: true, flushNoteBuffer: true, preserveDrumPhase: true });
 }
 
 function updateBpm(raw) {
@@ -1504,7 +1633,7 @@ function updateBpm(raw) {
   song.bpm = value;
   const element = document.getElementById('bpm-input');
   if (element && parseInt(element.value, 10) !== value) element.value = value;
-  commitSong({ flushNoteBuffer: true, snapToChordStart: true });
+  commitSong({ flushNoteBuffer: true, preserveDrumPhase: true });
 }
 
 function updateMixerField(field, value) {
@@ -1597,6 +1726,42 @@ function updateChordDrumPattern(sectionId, chordId, patternId) {
   renderDrumSequencer();
 }
 
+function updateLfoPatternName(patternId, name) {
+  const pattern = getLfoPatternById(patternId);
+  if (!pattern) return;
+  pattern.name = name;
+  commitSong();
+  refreshLfoPatternOptionLabels(pattern.id, pattern.name);
+}
+
+function updateLfoPatternField(patternId, key, value) {
+  const pattern = getLfoPatternById(patternId);
+  if (!pattern) return;
+  if (key === 'enabled') pattern.enabled = Boolean(value);
+  else if (key === 'depth') pattern.depth = clampNumber(value, pattern.depth, 0, 1);
+  else if (key === 'rateBeats') pattern.rateBeats = normalizeLfoRate(value, pattern.rateBeats);
+  else if (key === 'shape') pattern.shape = normalizeLfoShape(value, pattern.shape);
+  else if (key === 'smoothing') pattern.smoothing = clampNumber(value, pattern.smoothing, 0, 1);
+  else if (key === 'phase') pattern.phase = clampNumber(value, pattern.phase, 0, 0.999);
+  else return;
+  handleSynthParameterChange();
+}
+
+function selectEditLfoPattern(patternId) {
+  editingLfoPatternId = getValidLfoPatternId(patternId);
+  renderSynthRack();
+}
+
+function updateChordLfoPattern(sectionId, chordId, patternId) {
+  const resolvedPatternId = getValidLfoPatternId(patternId);
+  if (!resolvedPatternId) return;
+  mutateChord(sectionId, chordId, chord => {
+    chord.lfoPatternId = resolvedPatternId;
+  }, { refreshCursor: true });
+  editingLfoPatternId = resolvedPatternId;
+  renderSynthRack();
+}
+
 function copyChordConfiguration(sectionId, chordId) {
   const section = song.sections.find(entry => entry.id === sectionId);
   const chord = section?.chords.find(entry => entry.id === chordId);
@@ -1609,14 +1774,17 @@ function pasteChordConfiguration(sectionId, chordId) {
   mutateChord(sectionId, chordId, chord => {
     const targetId = chord.id;
     const targetPatternId = getChordDrumPatternId(chord, getDefaultDrumPatternId());
+    const targetLfoPatternId = getChordLfoPatternId(chord, getDefaultLfoPatternId());
     const pasted = normalizeChord({
       ...deepClone(copiedChordConfig),
       id: targetId,
       drumPatternId: targetPatternId,
-    }, targetPatternId);
+      lfoPatternId: targetLfoPatternId,
+    }, targetPatternId, targetLfoPatternId);
     Object.assign(chord, pasted, {
       id: targetId,
       drumPatternId: targetPatternId,
+      lfoPatternId: targetLfoPatternId,
     });
   }, { rerender: true, refreshCursor: true });
 }
@@ -1658,6 +1826,43 @@ function pasteDrumPatternToChord(sectionId, chordId) {
   const patternId = getChordDrumPatternId(chord, getDefaultDrumPatternId());
   if (!patternId) return;
   pasteDrumPattern(patternId);
+}
+
+function copyLfoPattern(patternId = editingLfoPatternId) {
+  const pattern = getLfoPatternById(patternId);
+  if (!pattern) return;
+  copiedLfoPatternConfig = cloneLfoPatternForClipboard(pattern);
+}
+
+function pasteLfoPattern(patternId = editingLfoPatternId) {
+  if (!copiedLfoPatternConfig) return;
+  const pattern = getLfoPatternById(patternId);
+  if (!pattern) return;
+  const normalized = normalizeLfoPattern({
+    id: pattern.id,
+    ...copiedLfoPatternConfig,
+  });
+  Object.assign(pattern, normalized, { id: pattern.id });
+  editingLfoPatternId = pattern.id;
+  refreshLfoPatternOptionLabels(pattern.id, pattern.name);
+  handleSynthParameterChange();
+  renderSynthRack();
+}
+
+function copyLfoPatternFromChord(sectionId, chordId) {
+  const section = song.sections.find(entry => entry.id === sectionId);
+  const chord = section?.chords.find(entry => entry.id === chordId);
+  if (!chord) return;
+  copyLfoPattern(getChordLfoPatternId(chord, getDefaultLfoPatternId()));
+}
+
+function pasteLfoPatternToChord(sectionId, chordId) {
+  const section = song.sections.find(entry => entry.id === sectionId);
+  const chord = section?.chords.find(entry => entry.id === chordId);
+  if (!chord) return;
+  const patternId = getChordLfoPatternId(chord, getDefaultLfoPatternId());
+  if (!patternId) return;
+  pasteLfoPattern(patternId);
 }
 
 // =====================================================================
@@ -1932,6 +2137,7 @@ function collectSongExportEvents() {
   const events = {
     notes: { chord: [], bass: [], string: [] },
     drums: [],
+    lfoSteps: [],
     totalBeats: 0,
   };
   const sequence = getSongSectionSequence();
@@ -1955,6 +2161,7 @@ function collectSongExportEvents() {
       const chordStartBeat = getChordPlaybackStartBeat(chord, chordBeats);
       const chordNoteCount = clampInt(chord.noteCount, chordTypeObj(chord.type).intervals.length, 1, 16);
       const absoluteChordBeat = sectionStartBeat + chordBeatOffset;
+      const lfoPatternId = getChordLfoPatternId(chord, getDefaultLfoPatternId());
       addHarmonicNoteEvents(events.notes.chord, {
         baseBeat: absoluteChordBeat,
         rootMidi: 60 + chord.root + getSynthTranspose(song.chordSynth),
@@ -1991,23 +2198,27 @@ function collectSongExportEvents() {
         });
       }
       const pattern = getDrumPatternById(chord.drumPatternId);
-      if (pattern) {
-        for (let beatInChord = 0; beatInChord < chordBeats; beatInChord++) {
-          const beatInSection = chordBeatOffset + beatInChord;
-          const stepBase = getSectionSixteenthOffset(beatInSection);
-          const beatBase = absoluteChordBeat + beatInChord;
-          for (let subdivision = 0; subdivision < 4; subdivision++) {
-            const step = (stepBase + subdivision) % STEPS;
-            const beat = beatBase + subdivision / 4;
-            DRUM_LANES.forEach(lane => {
-              if (!pattern.grid[lane.key]?.[step]) return;
-              events.drums.push({
-                beat,
-                laneKey: lane.key,
-                durationBeats: 0.125,
-              });
+      for (let beatInChord = 0; beatInChord < chordBeats; beatInChord++) {
+        const beatInSection = chordBeatOffset + beatInChord;
+        const stepBase = getSectionSixteenthOffset(beatInSection);
+        const beatBase = absoluteChordBeat + beatInChord;
+        for (let subdivision = 0; subdivision < 4; subdivision++) {
+          const step = (stepBase + subdivision) % STEPS;
+          const beat = beatBase + subdivision / 4;
+          events.lfoSteps.push({
+            beat,
+            transportStep: Math.round(beat * 4),
+            lfoPatternId,
+          });
+          if (!pattern) continue;
+          DRUM_LANES.forEach(lane => {
+            if (!pattern.grid[lane.key]?.[step]) return;
+            events.drums.push({
+              beat,
+              laneKey: lane.key,
+              durationBeats: 0.125,
             });
-          }
+          });
         }
       }
       chordBeatOffset += chordBeats;
@@ -2057,6 +2268,7 @@ function createOfflineRouting(ctx) {
     const delay = ctx.createDelay(5);
     const delayFilter = ctx.createBiquadFilter();
     const output = ctx.createGain();
+    const ampLfo = ctx.createGain();
     const convolver = ctx.createConvolver();
     convolver.buffer = createOfflineImpulseResponse(ctx);
     delayFilter.type = 'lowpass';
@@ -2073,8 +2285,9 @@ function createOfflineRouting(ctx) {
     delayFeedback.connect(delay);
     delayDry.connect(output);
     delayWet.connect(output);
-    output.connect(master);
-    return { input, dry, wet, preDelay, delayDry, delayWet, delayFeedback, delay, delayFilter, output, convolver };
+    output.connect(ampLfo);
+    ampLfo.connect(master);
+    return { input, dry, wet, preDelay, delayDry, delayWet, delayFeedback, delay, delayFilter, output, ampLfo, convolver };
   };
   const drumsGain = ctx.createGain();
   drumsGain.connect(master);
@@ -2107,6 +2320,7 @@ function applyOfflineMixSettings(routing) {
     bus.delayFeedback.gain.value = delayFeedback;
     bus.delay.delayTime.value = delaySeconds;
     bus.delayFilter.frequency.value = delayFilterCutoff;
+    bus.ampLfo.gain.value = 1;
   };
   setBus('chord', mixer.chordVolume, reverb.chordWet, song.chordSynth);
   setBus('bass', mixer.bassVolume, reverb.bassWet, song.bassSynth);
@@ -2428,6 +2642,26 @@ async function exportWAV() {
         );
       });
     };
+    const scheduleLfo = (steps) => {
+      if (!Array.isArray(steps) || !steps.length) return;
+      const bpm = clampInt(song?.bpm, 100, 40, 300);
+      const stepSeconds = (60 / bpm) / 4;
+      ['chord', 'bass', 'string'].forEach(kind => {
+        const bus = routing[kind];
+        if (!bus?.ampLfo?.gain) return;
+        bus.ampLfo.gain.setValueAtTime(1, 0);
+        steps.forEach(step => {
+          const time = startTime + beatOffsetToSeconds(step.beat);
+          const pattern = getLfoPatternById(step.lfoPatternId || getDefaultLfoPatternId());
+          const smoothing = clampNumber(pattern?.smoothing, 0.08, 0, 1);
+          const rampSeconds = Math.max(0.002, Math.min(stepSeconds * 0.95, 0.004 + smoothing * stepSeconds));
+          const gain = getLfoGainAtTransportStep(pattern, step.transportStep);
+          bus.ampLfo.gain.setValueAtTime(bus.ampLfo.gain.value, time);
+          bus.ampLfo.gain.linearRampToValueAtTime(gain, time + rampSeconds);
+        });
+      });
+    };
+    scheduleLfo(exportEvents.lfoSteps);
     schedulePart(exportEvents.notes.chord, song.chordSynth, 'chord');
     schedulePart(exportEvents.notes.bass, song.bassSynth, 'bass');
     schedulePart(exportEvents.notes.string, song.stringSynth, 'string');
@@ -2602,6 +2836,7 @@ let nextNoteTime = 0;
 let currentStep = 0;
 let currentBeatStepBase = 0;
 let currentDrumPatternId = null;
+let currentLfoPatternId = null;
 let isBeating = false;
 let songEndedPending = false;
 let playbackCursor = {
@@ -2662,6 +2897,47 @@ function getDelayTimeSeconds(synthSettings) {
   return (60 / bpm) * subdivision * getDelayFeelMultiplier(feel);
 }
 
+function getLfoShapeAmount(shape, phase) {
+  const normalized = Math.max(0, Math.min(0.9999, Number(phase) || 0));
+  if (shape === 'triangle') return normalized < 0.5 ? normalized * 2 : (1 - normalized) * 2;
+  if (shape === 'down') return 1 - normalized;
+  if (shape === 'up') return normalized;
+  if (shape === 'square') return normalized < 0.5 ? 1 : 0;
+  if (shape === 'pump') return Math.pow(normalized, 0.45);
+  return 0.5 - 0.5 * Math.cos(normalized * Math.PI * 2);
+}
+
+function getLfoGainAtTransportStep(pattern, transportStep) {
+  const resolved = pattern || getLfoPatternById(getDefaultLfoPatternId());
+  if (!resolved || !resolved.enabled) return 1;
+  const depth = clampNumber(resolved.depth, 0, 0, 1);
+  if (depth <= 0.0001) return 1;
+  const cycleBeats = normalizeLfoRate(resolved.rateBeats, 1);
+  const cycleSteps = Math.max(1, Math.round(cycleBeats * 4));
+  const wrappedStep = ((Math.floor(Number(transportStep) || 0) % cycleSteps) + cycleSteps) % cycleSteps;
+  const phaseOffsetSteps = Math.round(clampNumber(resolved.phase, 0, 0, 0.999) * cycleSteps) % cycleSteps;
+  const phase = ((wrappedStep + phaseOffsetSteps) % cycleSteps) / cycleSteps;
+  const amount = getLfoShapeAmount(normalizeLfoShape(resolved.shape, 'sine'), phase);
+  return Math.max(0.0001, (1 - depth) + depth * amount);
+}
+
+function applyAmpLfoAtStep(time, transportStep, patternId = currentLfoPatternId) {
+  if (!audioRouting) return;
+  const pattern = getLfoPatternById(patternId || getDefaultLfoPatternId());
+  const gainTarget = getLfoGainAtTransportStep(pattern, transportStep);
+  const bpm = clampInt(song?.bpm, 100, 40, 300);
+  const stepSeconds = (60 / bpm) / 4;
+  const smoothing = clampNumber(pattern?.smoothing, 0.08, 0, 1);
+  const rampSeconds = Math.max(0.002, Math.min(stepSeconds * 0.95, 0.004 + smoothing * stepSeconds));
+  ['chord', 'bass', 'string'].forEach(kind => {
+    const gainParam = audioRouting?.[kind]?.ampLfo?.gain;
+    if (!gainParam) return;
+    gainParam.cancelScheduledValues(time);
+    gainParam.setValueAtTime(gainParam.value, time);
+    gainParam.linearRampToValueAtTime(gainTarget, time + rampSeconds);
+  });
+}
+
 function setAudioParamSmooth(param, value, ctx = audioCtx, ramp = 0.015) {
   if (!param) return;
   const target = Number(value);
@@ -2694,6 +2970,7 @@ function setupAudioRouting() {
     const delay = ctx.createDelay(5);
     const delayFilter = ctx.createBiquadFilter();
     const output = ctx.createGain();
+    const ampLfo = ctx.createGain();
     const convolver = ctx.createConvolver();
     convolver.buffer = createImpulseResponse();
     delayFilter.type = 'lowpass';
@@ -2710,8 +2987,9 @@ function setupAudioRouting() {
     delayFeedback.connect(delay);
     delayDry.connect(output);
     delayWet.connect(output);
-    output.connect(master);
-    return { input, dry, wet, preDelay, delayDry, delayWet, delayFeedback, delay, delayFilter, output, convolver };
+    output.connect(ampLfo);
+    ampLfo.connect(master);
+    return { input, dry, wet, preDelay, delayDry, delayWet, delayFeedback, delay, delayFilter, output, ampLfo, convolver };
   };
 
   const drumsGain = ctx.createGain();
@@ -2750,6 +3028,7 @@ function applyAudioMixSettings() {
     setAudioParamSmooth(bus.delayFeedback.gain, delayFeedback);
     setAudioParamSmooth(bus.delay.delayTime, delaySeconds);
     setAudioParamSmooth(bus.delayFilter.frequency, delayFilterCutoff);
+    setAudioParamSmooth(bus.ampLfo.gain, 1);
   };
 
   setBus('chord', mixer.chordVolume, reverb.chordWet, song.chordSynth);
@@ -2809,8 +3088,10 @@ function registerAudioNodeEntry(sources, nodes, kind = 'generic', voiceKind = nu
   return entry;
 }
 
-function stopAndClearActiveAudioNodes() {
+function stopAndClearActiveAudioNodes({ clearVoices = true, clearDrums = true } = {}) {
   activeAudioNodes.forEach(entry => {
+    if (entry.kind === 'voice' && !clearVoices) return;
+    if (entry.kind === 'drum' && !clearDrums) return;
     entry.sources.forEach(source => {
       if (!source || typeof source.stop !== 'function') return;
       try {
@@ -2823,7 +3104,12 @@ function stopAndClearActiveAudioNodes() {
   });
 }
 
-function flushScheduledNotes({ restartPlayback = false, snapToChordStart = false } = {}) {
+function flushScheduledNotes({
+  restartPlayback = false,
+  snapToChordStart = false,
+  preserveDrumPhase = false,
+  clearDrumNodes = true,
+} = {}) {
   schedulerGeneration += 1;
   if (schedulerTimer !== null) {
     clearTimeout(schedulerTimer);
@@ -2834,12 +3120,15 @@ function flushScheduledNotes({ restartPlayback = false, snapToChordStart = false
     songEndTimeout = null;
   }
   songEndedPending = false;
-  stopAndClearActiveAudioNodes();
+  stopAndClearActiveAudioNodes({ clearVoices: true, clearDrums: clearDrumNodes });
   if (!(restartPlayback && isBeating)) return;
-  if (snapToChordStart) snapPlaybackCursorToChordStart();
-  currentStep = 0;
-  currentBeatStepBase = getSectionSixteenthOffset(playbackCursor.beatInSection);
-  currentDrumPatternId = null;
+  if (!preserveDrumPhase && snapToChordStart) snapPlaybackCursorToChordStart();
+  if (!preserveDrumPhase) {
+    currentStep = 0;
+    currentBeatStepBase = getSectionSixteenthOffset(playbackCursor.beatInSection);
+    currentDrumPatternId = null;
+    currentLfoPatternId = null;
+  }
   nextNoteTime = getAudioCtx().currentTime + 0.05;
   scheduler(schedulerGeneration);
 }
@@ -3659,13 +3948,16 @@ function scheduler(generation = schedulerGeneration) {
   const ctx = getAudioCtx();
   debugState.counters.schedulerTicks += 1;
   while (nextNoteTime < ctx.currentTime + SCHEDULE_AHEAD) {
+    const transportStep = currentStep;
     const beatSubdivision = currentStep % 4;
     if (beatSubdivision === 0) {
       currentBeatStepBase = getSectionSixteenthOffset(playbackCursor.beatInSection);
       const section = song.sections[playbackCursor.sectionIndex];
       const chord = section?.chords?.[playbackCursor.chordIndex];
       currentDrumPatternId = getChordDrumPatternId(chord, getDefaultDrumPatternId());
+      currentLfoPatternId = getChordLfoPatternId(chord, getDefaultLfoPatternId());
     }
+    applyAmpLfoAtStep(nextNoteTime, transportStep, currentLfoPatternId);
     scheduleStep((currentBeatStepBase + beatSubdivision) % STEPS, nextNoteTime, currentDrumPatternId);
     if (beatSubdivision === 0 && isBeating) scheduleMusicalBeat(nextNoteTime);
     const secondsPerSixteenth = (60 / song.bpm) / 4;
@@ -3687,6 +3979,7 @@ function startBeat() {
   initializePlaybackCursor();
   currentBeatStepBase = getSectionSixteenthOffset(playbackCursor.beatInSection);
   currentDrumPatternId = null;
+  currentLfoPatternId = null;
   nextNoteTime = getAudioCtx().currentTime + 0.05;
   debugLog('Playback started');
   scheduler(schedulerGeneration);
@@ -3857,7 +4150,7 @@ function renderDrumSequencer() {
   panel.append(header, controlsRow, grid);
 }
 
-function render() {
+function render({ preservePlaybackCursor = false } = {}) {
   song = normalizeSong(song);
 
   const titleElement = document.getElementById('song-title');
@@ -3881,7 +4174,7 @@ function render() {
   song.sections.forEach(section => container.appendChild(buildSection(section)));
   updateSongGoToControl();
   updatePlaybackModeUI();
-  initializePlaybackCursor();
+  if (!(preservePlaybackCursor && isBeating)) initializePlaybackCursor();
   applyAudioMixSettings();
 }
 
@@ -4063,9 +4356,113 @@ function renderSynthRack() {
   const rack = document.getElementById('synth-rack');
   if (!rack) return;
   rack.innerHTML = '';
+  if (!editingLfoPatternId || !song.lfoPatterns?.some(pattern => pattern.id === editingLfoPatternId)) {
+    editingLfoPatternId = getPreferredEditingLfoPatternId() || getDefaultLfoPatternId();
+  }
+  rack.appendChild(buildLfoPatternCard());
   rack.appendChild(buildSynthCard('chord'));
   rack.appendChild(buildSynthCard('bass'));
   rack.appendChild(buildSynthCard('string'));
+}
+
+function buildLfoPatternCard() {
+  const card = document.createElement('section');
+  card.className = 'synth-card';
+  const pattern = getLfoPatternById(editingLfoPatternId);
+  if (!pattern) return card;
+
+  const header = document.createElement('div');
+  header.className = 'synth-card-header';
+  const titleWrap = document.createElement('div');
+  titleWrap.className = 'synth-title-wrap';
+  const title = document.createElement('h2');
+  title.textContent = 'Amp LFO patterns';
+  const subtitle = document.createElement('p');
+  subtitle.className = 'synth-subtitle';
+  subtitle.textContent = 'Tempo-synced amplitude shaping assigned per chord';
+  titleWrap.append(title, subtitle);
+  header.appendChild(titleWrap);
+
+  const controlsGrid = document.createElement('div');
+  controlsGrid.className = 'synth-controls-grid';
+  controlsGrid.appendChild(buildSynthSelectControl(
+    'Edit pattern',
+    pattern.id,
+    (song.lfoPatterns || []).map(item => ({ value: item.id, label: item.name })),
+    'Edit amplitude LFO pattern',
+    value => selectEditLfoPattern(value),
+  ));
+  controlsGrid.appendChild(buildSynthSelectControl(
+    'Shape',
+    normalizeLfoShape(pattern.shape, 'sine'),
+    LFO_SHAPE_OPTIONS,
+    'Amplitude LFO shape',
+    value => updateLfoPatternField(pattern.id, 'shape', value),
+  ));
+  controlsGrid.appendChild(buildSynthSelectControl(
+    'Rate',
+    String(normalizeLfoRate(pattern.rateBeats, 1)),
+    LFO_RATE_OPTIONS.map(option => ({ value: String(option.value), label: option.label })),
+    'Amplitude LFO rate',
+    value => updateLfoPatternField(pattern.id, 'rateBeats', Number(value)),
+  ));
+
+  const nameRow = document.createElement('label');
+  nameRow.className = 'synth-slider';
+  const nameTop = document.createElement('div');
+  nameTop.className = 'synth-slider-top';
+  const nameLabel = document.createElement('span');
+  nameLabel.textContent = 'Name';
+  nameTop.appendChild(nameLabel);
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.value = pattern.name;
+  nameInput.setAttribute('aria-label', 'LFO pattern name');
+  nameInput.addEventListener('input', () => updateLfoPatternName(pattern.id, nameInput.value));
+  nameRow.append(nameTop, nameInput);
+  controlsGrid.appendChild(nameRow);
+
+  const enabledRow = document.createElement('label');
+  enabledRow.className = 'checkbox-inline synth-toggle';
+  const enabledInput = document.createElement('input');
+  enabledInput.type = 'checkbox';
+  enabledInput.checked = Boolean(pattern.enabled);
+  enabledInput.addEventListener('change', () => updateLfoPatternField(pattern.id, 'enabled', enabledInput.checked));
+  enabledRow.append(enabledInput, document.createTextNode('Enabled'));
+  controlsGrid.appendChild(enabledRow);
+
+  [
+    { key: 'depth', label: 'Depth', format: value => `${Math.round(value * 100)}%` },
+    { key: 'smoothing', label: 'Smooth', format: value => `${Math.round(value * 100)}%` },
+    { key: 'phase', label: 'Phase', format: value => `${Math.round(value * 100)}%` },
+  ].forEach(field => {
+    const row = document.createElement('label');
+    row.className = 'synth-slider';
+    const top = document.createElement('div');
+    top.className = 'synth-slider-top';
+    const label = document.createElement('span');
+    label.textContent = field.label;
+    const value = document.createElement('span');
+    value.className = 'synth-slider-value';
+    value.textContent = field.format(pattern[field.key]);
+    top.append(label, value);
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = '0';
+    input.max = '1';
+    input.step = '0.01';
+    input.value = String(pattern[field.key]);
+    input.setAttribute('aria-label', `LFO pattern ${field.key}`);
+    input.addEventListener('input', () => {
+      value.textContent = field.format(Number(input.value));
+      updateLfoPatternField(pattern.id, field.key, input.value);
+    });
+    row.append(top, input);
+    controlsGrid.appendChild(row);
+  });
+
+  card.append(header, controlsGrid);
+  return card;
 }
 
 function buildSynthCard(kind) {
@@ -4403,6 +4800,7 @@ function updateChordCard(sectionId, chordId) {
   const loopEnabledElement = document.getElementById('loop-enabled-' + chordId);
   const arpModeElement = document.getElementById('arp-mode-' + chordId);
   const drumPatternElement = document.getElementById('drum-pattern-' + chordId);
+  const lfoPatternElement = document.getElementById('lfo-pattern-' + chordId);
   if (rootElement) rootElement.textContent = noteName(chord.root);
   if (offsetElement) {
     const offset = formatPitchOffset(chord.root);
@@ -4433,6 +4831,7 @@ function updateChordCard(sectionId, chordId) {
   if (loopEnabledElement) loopEnabledElement.checked = Boolean(chord.loopEnabled);
   if (arpModeElement) arpModeElement.value = ARP_MODES.includes(chord.arpMode) ? chord.arpMode : 'off';
   if (drumPatternElement) drumPatternElement.value = getChordDrumPatternId(chord, getDefaultDrumPatternId()) || '';
+  if (lfoPatternElement) lfoPatternElement.value = getChordLfoPatternId(chord, getDefaultLfoPatternId()) || '';
 }
 
 function renderArrangementPanel(sectionId) {
@@ -5040,6 +5439,50 @@ function buildChordCard(chord, sectionId) {
   drumPatternActions.append(copyDrumButton, pasteDrumButton);
   drumPatternRow.append(drumPatternWrap, drumPatternActions);
 
+  const lfoPatternRow = document.createElement('div');
+  lfoPatternRow.className = 'chord-inline-row';
+
+  const lfoPatternWrap = document.createElement('div');
+  lfoPatternWrap.className = 'repeat-field';
+  const lfoPatternLabel = document.createElement('label');
+  lfoPatternLabel.textContent = 'Amp LFO';
+  lfoPatternLabel.setAttribute('for', 'lfo-pattern-' + chord.id);
+  const lfoPatternSelect = document.createElement('select');
+  lfoPatternSelect.id = 'lfo-pattern-' + chord.id;
+  lfoPatternSelect.className = 'repeat-select';
+  lfoPatternSelect.setAttribute('aria-label', 'Amplitude LFO pattern for this chord');
+  (song.lfoPatterns || []).forEach(pattern => {
+    const option = document.createElement('option');
+    option.value = pattern.id;
+    option.textContent = pattern.name;
+    if (pattern.id === getChordLfoPatternId(chord, getDefaultLfoPatternId())) option.selected = true;
+    lfoPatternSelect.appendChild(option);
+  });
+  lfoPatternSelect.addEventListener('change', () => updateChordLfoPattern(sectionId, chord.id, lfoPatternSelect.value));
+  lfoPatternWrap.append(lfoPatternLabel, lfoPatternSelect);
+
+  const lfoPatternActions = document.createElement('div');
+  lfoPatternActions.className = 'mini-action-group';
+
+  const copyLfoButton = document.createElement('button');
+  copyLfoButton.type = 'button';
+  copyLfoButton.className = 'mini-action-btn';
+  copyLfoButton.textContent = 'Copy';
+  copyLfoButton.title = 'Copy this chord amplitude LFO pattern';
+  copyLfoButton.setAttribute('aria-label', 'Copy this chord amplitude LFO pattern');
+  copyLfoButton.addEventListener('click', () => copyLfoPatternFromChord(sectionId, chord.id));
+
+  const pasteLfoButton = document.createElement('button');
+  pasteLfoButton.type = 'button';
+  pasteLfoButton.className = 'mini-action-btn';
+  pasteLfoButton.textContent = 'Paste';
+  pasteLfoButton.title = 'Paste the copied amplitude LFO pattern into this chord pattern';
+  pasteLfoButton.setAttribute('aria-label', 'Paste the copied amplitude LFO pattern into this chord pattern');
+  pasteLfoButton.addEventListener('click', () => pasteLfoPatternToChord(sectionId, chord.id));
+
+  lfoPatternActions.append(copyLfoButton, pasteLfoButton);
+  lfoPatternRow.append(lfoPatternWrap, lfoPatternActions);
+
   const actionBar = document.createElement('div');
   actionBar.className = 'chord-action-bar';
 
@@ -5095,6 +5538,7 @@ function buildChordCard(chord, sectionId) {
     repeatRow,
     articulationRow,
     drumPatternRow,
+    lfoPatternRow,
     actionBar,
   );
   return card;
