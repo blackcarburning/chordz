@@ -2999,8 +2999,9 @@ function playChordNotes(rootSemitone, typeName, when, beats = 4, repeats = 1, st
     const arpStepPattern = buildArpStepPattern(intervals.length, arpMode);
     const stepCount = arpStepPattern.length;
     if (!stepCount) return;
-    // Arpeggio articulation is independent from chord looping mode.
-    const stepBeats = 0.5;
+    // In arp mode, chordRepeat (repeats param / Chord X) controls arp speed:
+    // repeats=1 → quarter-note arp, repeats=2 → eighth-note arp, repeats=4 → sixteenth-note, etc.
+    const stepBeats = 1 / repeatCount;
     const stepSeconds = beatOffsetToSeconds(stepBeats);
     const noteDuration = Math.max(0.05, stepSeconds * 0.88);
     const blockStartTime = when + beatOffsetToSeconds(startOffsetBeats);
