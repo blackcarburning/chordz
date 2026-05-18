@@ -1010,6 +1010,11 @@ input[type='range'] {
   padding: 0.2rem 0.35rem;
   font-size: 0.78rem;
 }
+.chord-loop-toggle {
+  justify-self: start;
+  align-self: end;
+  font-size: 0.72rem;
+}
 .beats-input {
   width: 3.4rem !important;
   padding: 0.2rem 0.35rem;
