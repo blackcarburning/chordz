@@ -1889,12 +1889,18 @@ function playChordNotes(rootSemitone, typeName, when, beats = 4, repeats = 1, st
   const activeBeats = Math.max(0.25, totalBeats - startOffsetBeats);
   if (cycle && chordType.intervals.length) {
     const noteCount = chordType.intervals.length;
-    const stepCount = Math.max(1, noteCount * repeatCount);
-    const stepBeats = Math.max(0.125, activeBeats / stepCount);
-    const stepDuration = Math.max(0.08, beatsToSeconds(stepBeats) * 0.86);
+    const stepBeats = Math.max(0.125, 1 / (noteCount * repeatCount));
+    const stepCount = Math.max(1, Math.ceil(activeBeats / stepBeats));
+    const blockEndTime = when + beatOffsetToSeconds(totalBeats);
+    const baseStepDuration = Math.max(0.08, beatsToSeconds(stepBeats) * 0.86);
     for (let step = 0; step < stepCount; step++) {
+      const hitBeat = startOffsetBeats + step * stepBeats;
+      if (hitBeat >= totalBeats) break;
       const interval = chordType.intervals[step % noteCount];
-      const hitTime = when + beatOffsetToSeconds(startOffsetBeats + step * stepBeats);
+      const hitTime = when + beatOffsetToSeconds(hitBeat);
+      const remainingDuration = blockEndTime - hitTime;
+      if (remainingDuration <= 0) break;
+      const stepDuration = Math.min(baseStepDuration, Math.max(0.04, remainingDuration * 0.98));
       playSynthVoice(
         frequencyFromMidi(rootMidi + interval),
         hitTime,
