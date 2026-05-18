@@ -509,6 +509,7 @@ let songVersion = 0;
 const synthPanelExpanded = { chord: true, bass: true };
 let editingDrumPatternId = null;
 let activePitchTarget = null;
+let activeLoopTarget = null;
 let debugPanelOpen = false;
 let debugRefreshTimer = null;
 let songEndTimeout = null;
@@ -554,6 +555,80 @@ function getActivePitchTarget() {
     chordId: chord.id,
     kind: activePitchTarget.kind === 'bass' ? 'bass' : 'chord',
   };
+}
+
+function getActiveLoopTarget() {
+  if (!activeLoopTarget) return null;
+  const section = song.sections.find(entry => entry.id === activeLoopTarget.sectionId);
+  if (!section) {
+    activeLoopTarget = null;
+    return null;
+  }
+  const chord = section.chords.find(entry => entry.id === activeLoopTarget.chordId);
+  if (!chord) {
+    activeLoopTarget = null;
+    return null;
+  }
+  return {
+    sectionId: section.id,
+    chordId: chord.id,
+  };
+}
+
+function clearActiveLoopTarget() {
+  if (!activeLoopTarget) return;
+  activeLoopTarget = null;
+  updatePlaybackHighlights();
+}
+
+function setPlaybackCursorFromPoint(point, songBeatIndex) {
+  if (!point) return;
+  playbackCursor.sequenceIndex = point.sequenceIndex;
+  playbackCursor.sectionIndex = point.sectionIndex;
+  playbackCursor.chordIndex = point.chordIndex;
+  playbackCursor.beatInChord = point.beatInChord;
+  playbackCursor.beatInSection = point.beatInSection;
+  playbackCursor.arrangerEntryId = point.arrangerEntryId;
+  playbackCursor.arrangerEntryIndex = point.arrangerEntryIndex;
+  playbackCursor.arrangerRepeatIndex = point.arrangerRepeatIndex;
+  playbackCursor.songBeatIndex = songBeatIndex;
+}
+
+function findSongBeatPointForChord(sectionId, chordId, map = buildSongBeatMap()) {
+  if (!sectionId || !chordId || !map.length) return null;
+  const sectionIndex = song.sections.findIndex(entry => entry.id === sectionId);
+  if (sectionIndex < 0) return null;
+  const chordIndex = song.sections[sectionIndex]?.chords?.findIndex(entry => entry.id === chordId);
+  if (chordIndex < 0) return null;
+  const index = map.findIndex(point => point.sectionIndex === sectionIndex && point.chordIndex === chordIndex && point.beatInChord === 0);
+  if (index < 0) return null;
+  return { index, point: map[index] };
+}
+
+function movePlaybackToActiveLoopTarget({ rescheduleAudio = false } = {}) {
+  const loopTarget = getActiveLoopTarget();
+  if (!loopTarget || !usesSongTimelineMode(song.playbackMode || 'edit')) return false;
+  const targetPoint = findSongBeatPointForChord(loopTarget.sectionId, loopTarget.chordId);
+  if (!targetPoint) return false;
+  setPlaybackCursorFromPoint(targetPoint.point, targetPoint.index);
+  songEndedPending = false;
+  if (rescheduleAudio && isBeating) {
+    stopAndClearActiveAudioNodes();
+    currentStep = 0;
+    nextNoteTime = getAudioCtx().currentTime + 0.05;
+  }
+  updatePlaybackPositionUI(playbackCursor.sectionIndex, playbackCursor.chordIndex, playbackCursor.beatInChord, playbackCursor.songBeatIndex);
+  return true;
+}
+
+function setActiveLoopTarget(sectionId, chordId, { retargetPlayback = false } = {}) {
+  if (!sectionId || !chordId) return;
+  const section = song.sections.find(entry => entry.id === sectionId);
+  if (!section || !section.chords.some(entry => entry.id === chordId)) return;
+  activeLoopTarget = { sectionId, chordId };
+  updatePlaybackHighlights();
+  const mode = song.playbackMode || 'edit';
+  if (mode === 'looping') movePlaybackToActiveLoopTarget({ rescheduleAudio: retargetPlayback && isBeating });
 }
 
 function normalizeChord(rawChord) {
@@ -828,9 +903,13 @@ function selectEditSection(sectionId) {
 function setPlaybackMode(mode) {
   if (!PLAYBACK_MODES.includes(mode)) return;
   song.playbackMode = mode;
+  if (mode !== 'looping') clearActiveLoopTarget();
   commitSong();
   updatePlaybackModeUI();
-  if (isBeating) initializePlaybackCursor();
+  if (isBeating) {
+    if (mode === 'looping' && getActiveLoopTarget()) movePlaybackToActiveLoopTarget({ rescheduleAudio: true });
+    else initializePlaybackCursor();
+  }
 }
 
 function setSynthPreset(kind, presetId) {
@@ -2074,15 +2153,7 @@ function setSongPositionFromSlider(rawValue) {
   if (!map.length) return;
   const index = Math.max(0, Math.min(map.length - 1, clampInt(rawValue, 0, 0, map.length - 1)));
   const point = map[index];
-  playbackCursor.sequenceIndex = point.sequenceIndex;
-  playbackCursor.sectionIndex = point.sectionIndex;
-  playbackCursor.chordIndex = point.chordIndex;
-  playbackCursor.beatInChord = point.beatInChord;
-  playbackCursor.beatInSection = point.beatInSection;
-  playbackCursor.arrangerEntryId = point.arrangerEntryId;
-  playbackCursor.arrangerEntryIndex = point.arrangerEntryIndex;
-  playbackCursor.arrangerRepeatIndex = point.arrangerRepeatIndex;
-  playbackCursor.songBeatIndex = index;
+  setPlaybackCursorFromPoint(point, index);
   updatePlaybackPositionUI(playbackCursor.sectionIndex, playbackCursor.chordIndex, playbackCursor.beatInChord, playbackCursor.songBeatIndex);
 }
 
@@ -2113,21 +2184,29 @@ function advancePlaybackCursor() {
     if (!map.length) return;
     const currentPoint = map[playbackCursor.songBeatIndex];
     if (mode === 'looping' && currentPoint) {
-      const section = song.sections[currentPoint.sectionIndex];
-      const chord = section?.chords?.[currentPoint.chordIndex];
-      if (chord?.loopEnabled && currentPoint.beatInChord + 1 >= (chord.beats || 4)) {
-        const loopStartIndex = Math.max(0, playbackCursor.songBeatIndex - currentPoint.beatInChord);
-        const loopPoint = map[loopStartIndex] || currentPoint;
-        playbackCursor.sequenceIndex = loopPoint.sequenceIndex;
-        playbackCursor.sectionIndex = loopPoint.sectionIndex;
-        playbackCursor.chordIndex = loopPoint.chordIndex;
-        playbackCursor.beatInChord = loopPoint.beatInChord;
-        playbackCursor.beatInSection = loopPoint.beatInSection;
-        playbackCursor.arrangerEntryId = loopPoint.arrangerEntryId;
-        playbackCursor.arrangerEntryIndex = loopPoint.arrangerEntryIndex;
-        playbackCursor.arrangerRepeatIndex = loopPoint.arrangerRepeatIndex;
-        playbackCursor.songBeatIndex = loopStartIndex;
-        return;
+      const loopTarget = getActiveLoopTarget();
+      if (loopTarget) {
+        const targetPoint = findSongBeatPointForChord(loopTarget.sectionId, loopTarget.chordId, map);
+        const targetSection = song.sections[targetPoint?.point?.sectionIndex];
+        const targetChord = targetSection?.chords?.[targetPoint?.point?.chordIndex];
+        const isTargetBeat = Boolean(
+          targetPoint
+          && currentPoint.sectionIndex === targetPoint.point.sectionIndex
+          && currentPoint.chordIndex === targetPoint.point.chordIndex,
+        );
+        if (targetChord?.loopEnabled && isTargetBeat && currentPoint.beatInChord + 1 >= (targetChord.beats || 4)) {
+          setPlaybackCursorFromPoint(targetPoint.point, targetPoint.index);
+          return;
+        }
+      } else {
+        const section = song.sections[currentPoint.sectionIndex];
+        const chord = section?.chords?.[currentPoint.chordIndex];
+        if (chord?.loopEnabled && currentPoint.beatInChord + 1 >= (chord.beats || 4)) {
+          const loopStartIndex = Math.max(0, playbackCursor.songBeatIndex - currentPoint.beatInChord);
+          const loopPoint = map[loopStartIndex] || currentPoint;
+          setPlaybackCursorFromPoint(loopPoint, loopStartIndex);
+          return;
+        }
       }
     }
     const nextIndex = playbackCursor.songBeatIndex + 1;
@@ -2136,15 +2215,7 @@ function advancePlaybackCursor() {
       return;
     }
     const point = map[nextIndex];
-    playbackCursor.sequenceIndex = point.sequenceIndex;
-    playbackCursor.sectionIndex = point.sectionIndex;
-    playbackCursor.chordIndex = point.chordIndex;
-    playbackCursor.beatInChord = point.beatInChord;
-    playbackCursor.beatInSection = point.beatInSection;
-    playbackCursor.arrangerEntryId = point.arrangerEntryId;
-    playbackCursor.arrangerEntryIndex = point.arrangerEntryIndex;
-    playbackCursor.arrangerRepeatIndex = point.arrangerRepeatIndex;
-    playbackCursor.songBeatIndex = nextIndex;
+    setPlaybackCursorFromPoint(point, nextIndex);
     return;
   }
 
@@ -3168,7 +3239,10 @@ function buildArrangementBlock(section, chord, laneType, index) {
     const placeAfter = event.clientX > rect.left + rect.width / 2;
     moveChordWithinSection(section.id, draggedChordId, chord.id, placeAfter);
   });
-  block.addEventListener('click', () => focusNoteEditorForChord(section.id, chord.id, laneType === 'bass' ? 'bass' : 'chord'));
+  block.addEventListener('click', () => {
+    if ((song.playbackMode || 'edit') === 'looping') setActiveLoopTarget(section.id, chord.id, { retargetPlayback: isBeating });
+    focusNoteEditorForChord(section.id, chord.id, laneType === 'bass' ? 'bass' : 'chord');
+  });
 
   return block;
 }
@@ -3221,6 +3295,12 @@ function buildChordCard(chord, sectionId) {
   card.id = 'chord-card-' + chord.id;
   card.setAttribute('aria-label', `${formatPitchLabel(chord.root)}${chord.type} chord`);
   card.addEventListener('click', event => {
+    if (
+      (song.playbackMode || 'edit') === 'looping'
+      && !event.target?.closest?.('button, input, select, label')
+    ) {
+      setActiveLoopTarget(sectionId, chord.id, { retargetPlayback: isBeating });
+    }
     if (event.target?.closest?.('.ctrl-row[data-note-editor-kind="bass"]')) {
       setActivePitchTarget(sectionId, chord.id, 'bass');
       return;
@@ -3463,6 +3543,13 @@ function makeIconBtn(text, title, onClick) {
 
 function updatePlaybackHighlights() {
   document.querySelectorAll('.arrangement-block.playing, .chord-card.playing, .arranger-entry.playing').forEach(element => element.classList.remove('playing'));
+  document.querySelectorAll('.arrangement-block.loop-target, .chord-card.loop-target').forEach(element => element.classList.remove('loop-target'));
+  const loopTarget = getActiveLoopTarget();
+  if (loopTarget) {
+    document.getElementById(`arrangement-chords-${loopTarget.chordId}`)?.classList.add('loop-target');
+    document.getElementById(`arrangement-bass-${loopTarget.chordId}`)?.classList.add('loop-target');
+    document.getElementById(`chord-card-${loopTarget.chordId}`)?.classList.add('loop-target');
+  }
   if (!isBeating) return;
   const section = song.sections[playbackCursor.sectionIndex];
   const chord = section?.chords[playbackCursor.chordIndex];
