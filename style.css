@@ -669,6 +669,35 @@ input[type='range'] {
   min-width: 0;
   font-size: 0.82rem;
 }
+.lfo-custom-editor {
+  margin-top: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius);
+  padding: 0.6rem;
+  background: rgba(0, 0, 0, 0.16);
+  display: grid;
+  gap: 0.45rem;
+}
+.lfo-custom-editor-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+.lfo-custom-canvas {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  touch-action: none;
+  background: rgba(17, 17, 28, 0.75);
+}
 
 #sections-container {
   padding: 0.9rem 1rem;
