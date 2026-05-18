@@ -463,7 +463,7 @@ function normalizeSynthSettings(kind, rawSynth, legacyPreset) {
   return normalized;
 }
 
-function createSection(type) {
+function createSection(type, drumPatternId = null) {
   const defaults = SECTION_DEFAULTS[type] || [];
   return {
     id: makeId(),
@@ -473,8 +473,7 @@ function createSection(type) {
     scaleType: 'Major',
     crashOnStart: false,
     rollAtEnd: false,
-    drumPatternId: null,
-    chords: defaults.map(chord => createChord(chord.root - 12, chord.type)),
+    chords: defaults.map(chord => createChord(chord.root - 12, chord.type, drumPatternId)),
   };
 }
 
@@ -482,8 +481,11 @@ function createDefaultSong() {
   const now = Date.now();
   const drumPatterns = Array.from({ length: DRUM_PATTERN_COUNT }, (_, i) => createDefaultDrumPattern(i));
   const defaultPatternId = drumPatterns[0].id;
-  const sections = [createSection('Verse'), createSection('Chorus'), createSection('Bridge')];
-  sections.forEach(s => { s.drumPatternId = defaultPatternId; });
+  const sections = [
+    createSection('Verse', defaultPatternId),
+    createSection('Chorus', defaultPatternId),
+    createSection('Bridge', defaultPatternId),
+  ];
   return {
     id: makeId(),
     title: 'Untitled Song',
@@ -528,7 +530,7 @@ function normalizeStartBeat(value, fallback = 1) {
   return clampInt(value, fallback, 1, 4);
 }
 
-function createChord(root = DEFAULT_CHORD_ROOT, type = 'maj') {
+function createChord(root = DEFAULT_CHORD_ROOT, type = 'maj', drumPatternId = null) {
   const normalizedRoot = normalizeSemitone(root, DEFAULT_CHORD_ROOT);
   const normalizedType = CHORD_TYPES.some(entry => entry.name === type) ? type : 'maj';
   return {
@@ -545,6 +547,7 @@ function createChord(root = DEFAULT_CHORD_ROOT, type = 'maj') {
     startBeat: 1,
     loopEnabled: false,
     arpMode: 'off',
+    drumPatternId,
   };
 }
 
@@ -599,6 +602,8 @@ let song = createDefaultSong();
 let songVersion = 0;
 const synthPanelExpanded = { chord: true, bass: true, string: true };
 let editingDrumPatternId = null;
+let copiedChordConfig = null;
+let copiedDrumPatternConfig = null;
 let activePitchTarget = null;
 let activeLoopTarget = null;
 let debugPanelOpen = false;
@@ -672,6 +677,71 @@ function clearActiveLoopTarget() {
   updatePlaybackHighlights();
 }
 
+function deepClone(value) {
+  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+}
+
+function getDefaultDrumPatternId() {
+  return song.drumPatterns?.[0]?.id || null;
+}
+
+function getValidDrumPatternId(patternId, fallback = getDefaultDrumPatternId()) {
+  if (song.drumPatterns?.some(pattern => pattern.id === patternId)) return patternId;
+  return fallback;
+}
+
+function getDrumPatternById(patternId) {
+  const patterns = song.drumPatterns || [];
+  if (!patterns.length) return null;
+  const resolvedId = getValidDrumPatternId(patternId, patterns[0].id);
+  return patterns.find(pattern => pattern.id === resolvedId) || patterns[0];
+}
+
+function getChordDrumPatternId(chord, fallback = getDefaultDrumPatternId()) {
+  return getValidDrumPatternId(chord?.drumPatternId, fallback);
+}
+
+function refreshDrumPatternOptionLabels(patternId, name) {
+  document.querySelectorAll(`option[value="${patternId}"]`).forEach(option => {
+    option.textContent = name;
+  });
+}
+
+function cloneChordForClipboard(chord) {
+  if (!chord) return null;
+  const { id, drumPatternId, ...copied } = normalizeChord(chord, getDefaultDrumPatternId());
+  return deepClone(copied);
+}
+
+function cloneDrumPatternForClipboard(pattern) {
+  if (!pattern) return null;
+  return deepClone({
+    name: pattern.name,
+    grid: pattern.grid,
+  });
+}
+
+function getPreferredEditingChord(section) {
+  if (!section) return null;
+  const pitchTarget = getActivePitchTarget();
+  if (pitchTarget?.sectionId === section.id) {
+    const pitchChord = section.chords.find(chord => chord.id === pitchTarget.chordId);
+    if (pitchChord) return pitchChord;
+  }
+  const loopTarget = getActiveLoopTarget();
+  if (loopTarget?.sectionId === section.id) {
+    const loopChord = section.chords.find(chord => chord.id === loopTarget.chordId);
+    if (loopChord) return loopChord;
+  }
+  return section.chords[0] || null;
+}
+
+function getPreferredEditingDrumPatternId() {
+  const selectedSection = song.sections.find(section => section.id === song.selectedSectionId) || song.sections[0];
+  const preferredChord = getPreferredEditingChord(selectedSection);
+  return getChordDrumPatternId(preferredChord, getDefaultDrumPatternId());
+}
+
 function setPlaybackCursorFromPoint(point, songBeatIndex) {
   if (!point) return;
   playbackCursor.sequenceIndex = point.sequenceIndex;
@@ -718,7 +788,7 @@ function setActiveLoopTarget(sectionId, chordId, { retargetPlayback = false } = 
   if (mode === 'looping') movePlaybackToActiveLoopTarget({ rescheduleAudio: retargetPlayback && isBeating });
 }
 
-function normalizeChord(rawChord) {
+function normalizeChord(rawChord, fallbackDrumPatternId = null) {
   const chord = rawChord || {};
   const loopEnabled = chord.loopEnabled !== undefined ? chord.loopEnabled : chord.cycle;
   const arpMode = ARP_MODES.includes(chord.arpMode) ? chord.arpMode : 'off';
@@ -740,10 +810,13 @@ function normalizeChord(rawChord) {
     startBeat: normalizeStartBeat(chord.startBeat, 1),
     loopEnabled: Boolean(loopEnabled),
     arpMode,
+    drumPatternId: typeof chord.drumPatternId === 'string' && chord.drumPatternId.trim()
+      ? chord.drumPatternId
+      : fallbackDrumPatternId,
   };
 }
 
-function normalizeSection(rawSection, fallbackType = 'Custom') {
+function normalizeSection(rawSection, fallbackType = 'Custom', fallbackDrumPatternId = null) {
   const section = rawSection || {};
   const type = SECTION_TYPES.includes(section.type) ? section.type : fallbackType;
   return {
@@ -754,8 +827,8 @@ function normalizeSection(rawSection, fallbackType = 'Custom') {
     scaleType: SCALES.some(scale => scale.name === section.scaleType) ? section.scaleType : 'Major',
     crashOnStart: Boolean(section.crashOnStart),
     rollAtEnd: Boolean(section.rollAtEnd),
-    drumPatternId: section.drumPatternId || null,
-    chords: (Array.isArray(section.chords) ? section.chords : []).map(normalizeChord),
+    chords: (Array.isArray(section.chords) ? section.chords : [])
+      .map(chord => normalizeChord(chord, fallbackDrumPatternId)),
   };
 }
 
@@ -769,15 +842,20 @@ function normalizeSong(rawSong) {
 
   const sections = (Array.isArray(parsed.sections) ? parsed.sections : base.sections)
     .map(section => {
-      const normalized = normalizeSection(section, section?.type);
+      const legacyPatternId = validPatternIds.has(section?.drumPatternId)
+        ? section.drumPatternId
+        : defaultPatternId;
+      const normalized = normalizeSection(section, section?.type, legacyPatternId);
       return {
         ...normalized,
-        drumPatternId: validPatternIds.has(normalized.drumPatternId) ? normalized.drumPatternId : defaultPatternId,
+        chords: normalized.chords.map(chord => ({
+          ...chord,
+          drumPatternId: validPatternIds.has(chord.drumPatternId) ? chord.drumPatternId : legacyPatternId,
+        })),
       };
     });
   if (sections.length === 0) {
-    const defaultSection = createSection('Verse');
-    defaultSection.drumPatternId = defaultPatternId;
+    const defaultSection = createSection('Verse', defaultPatternId);
     sections.push(defaultSection);
   }
   const selectedSectionExists = sections.some(section => section.id === parsed.selectedSectionId);
@@ -981,8 +1059,7 @@ function snapPlaybackCursorToChordStart() {
 }
 
 function addSection(type) {
-  const section = createSection(type);
-  section.drumPatternId = song.drumPatterns?.[0]?.id || null;
+  const section = createSection(type, getDefaultDrumPatternId());
   song.sections.push(section);
   if (!song.selectedSectionId) song.selectedSectionId = section.id;
   commitSong({ rerender: true, refreshCursor: true });
@@ -1041,8 +1118,7 @@ function updateSectionOptions(id, { crashOnStart, rollAtEnd }) {
 function selectEditSection(sectionId) {
   if (!song.sections.some(section => section.id === sectionId)) return;
   song.selectedSectionId = sectionId;
-  const selectedSection = song.sections.find(s => s.id === sectionId);
-  if (selectedSection?.drumPatternId) editingDrumPatternId = selectedSection.drumPatternId;
+  editingDrumPatternId = getPreferredEditingDrumPatternId();
   commitSong();
   updatePlaybackModeUI();
   updatePlaybackHighlights();
@@ -1146,7 +1222,8 @@ function updateSynthWaveform(kind, fieldKey, value) {
 function addChord(sectionId) {
   const section = song.sections.find(entry => entry.id === sectionId);
   if (!section) return;
-  section.chords.push(createChord());
+  const inheritedPatternId = getChordDrumPatternId(section.chords[section.chords.length - 1], getDefaultDrumPatternId());
+  section.chords.push(createChord(DEFAULT_CHORD_ROOT, 'maj', inheritedPatternId));
   commitSong({ rerender: true, refreshCursor: true });
 }
 
@@ -1420,39 +1497,89 @@ function updateDrumStep(patternId, laneKey, step) {
 }
 
 function updateDrumPatternName(patternId, name) {
-  const pattern = song.drumPatterns?.find(p => p.id === patternId);
+  const pattern = getDrumPatternById(patternId);
   if (!pattern) return;
   pattern.name = name;
   commitSong();
-  // Update all <option> elements referencing this pattern's id
-  document.querySelectorAll(`option[value="${patternId}"]`).forEach(opt => {
-    opt.textContent = name;
-  });
+  refreshDrumPatternOptionLabels(pattern.id, name);
 }
 
 function selectEditDrumPattern(patternId) {
-  if (!song.drumPatterns?.some(p => p.id === patternId)) return;
-  editingDrumPatternId = patternId;
-  const activeSection = song.sections.find(s => s.id === song.selectedSectionId);
-  if (activeSection) {
-    activeSection.drumPatternId = patternId;
-    const sectionDrumSelect = document.querySelector(`.section[data-id="${activeSection.id}"] .section-drum-pattern-select`);
-    if (sectionDrumSelect) sectionDrumSelect.value = patternId;
-    handleSchedulingParameterChange();
-  }
+  editingDrumPatternId = getValidDrumPatternId(patternId);
   renderDrumSequencer();
 }
 
-function updateSectionDrumPattern(sectionId, patternId) {
-  const section = song.sections.find(s => s.id === sectionId);
-  if (!section) return;
-  if (!song.drumPatterns?.some(p => p.id === patternId)) return;
-  section.drumPatternId = patternId;
-  if (sectionId === song.selectedSectionId) {
-    editingDrumPatternId = patternId;
-    renderDrumSequencer();
-  }
+function updateChordDrumPattern(sectionId, chordId, patternId) {
+  const resolvedPatternId = getValidDrumPatternId(patternId);
+  if (!resolvedPatternId) return;
+  mutateChord(sectionId, chordId, chord => {
+    chord.drumPatternId = resolvedPatternId;
+  }, { refreshCursor: true });
+  editingDrumPatternId = resolvedPatternId;
+  renderDrumSequencer();
+}
+
+function copyChordConfiguration(sectionId, chordId) {
+  const section = song.sections.find(entry => entry.id === sectionId);
+  const chord = section?.chords.find(entry => entry.id === chordId);
+  if (!chord) return;
+  copiedChordConfig = cloneChordForClipboard(chord);
+}
+
+function pasteChordConfiguration(sectionId, chordId) {
+  if (!copiedChordConfig) return;
+  mutateChord(sectionId, chordId, chord => {
+    const targetId = chord.id;
+    const targetPatternId = getChordDrumPatternId(chord, getDefaultDrumPatternId());
+    const pasted = normalizeChord({
+      ...deepClone(copiedChordConfig),
+      id: targetId,
+      drumPatternId: targetPatternId,
+    }, targetPatternId);
+    Object.assign(chord, pasted, {
+      id: targetId,
+      drumPatternId: targetPatternId,
+    });
+  }, { rerender: true, refreshCursor: true });
+}
+
+function copyDrumPattern(patternId = editingDrumPatternId) {
+  const pattern = getDrumPatternById(patternId);
+  if (!pattern) return;
+  copiedDrumPatternConfig = cloneDrumPatternForClipboard(pattern);
+}
+
+function pasteDrumPattern(patternId = editingDrumPatternId) {
+  if (!copiedDrumPatternConfig) return;
+  const pattern = getDrumPatternById(patternId);
+  if (!pattern) return;
+  const normalized = normalizeDrumPatterns([{
+    id: pattern.id,
+    name: copiedDrumPatternConfig.name,
+    grid: copiedDrumPatternConfig.grid,
+  }])[0];
+  pattern.name = normalized.name;
+  pattern.grid = normalized.grid;
+  editingDrumPatternId = pattern.id;
+  refreshDrumPatternOptionLabels(pattern.id, pattern.name);
   handleSchedulingParameterChange();
+  renderDrumSequencer();
+}
+
+function copyDrumPatternFromChord(sectionId, chordId) {
+  const section = song.sections.find(entry => entry.id === sectionId);
+  const chord = section?.chords.find(entry => entry.id === chordId);
+  if (!chord) return;
+  copyDrumPattern(getChordDrumPatternId(chord, getDefaultDrumPatternId()));
+}
+
+function pasteDrumPatternToChord(sectionId, chordId) {
+  const section = song.sections.find(entry => entry.id === sectionId);
+  const chord = section?.chords.find(entry => entry.id === chordId);
+  if (!chord) return;
+  const patternId = getChordDrumPatternId(chord, getDefaultDrumPatternId());
+  if (!patternId) return;
+  pasteDrumPattern(patternId);
 }
 
 // =====================================================================
@@ -1685,7 +1812,7 @@ function addHarmonicNoteEvents(target, {
   if (arpMode !== 'off') {
     const arpStepPattern = buildArpStepPattern(intervals.length, arpMode);
     if (!arpStepPattern.length) return;
-    const stepBeats = 0.5;
+    const stepBeats = 1 / repeatCount;
     const stepDurationBeats = Math.max(secondsToBeats(0.05), stepBeats * 0.88);
     const blockStartBeat = baseBeat + startOffsetBeats;
     const blockEndBeat = baseBeat + normalizedBeats;
@@ -1730,7 +1857,6 @@ function collectSongExportEvents() {
     totalBeats: 0,
   };
   const sequence = getSongSectionSequence();
-  const patterns = song.drumPatterns || [];
   let songBeatCursor = 0;
 
   sequence.forEach(sequencePoint => {
@@ -1786,27 +1912,28 @@ function collectSongExportEvents() {
           minDurationSeconds: 0.1,
         });
       }
-      chordBeatOffset += chordBeats;
-    });
-
-    const pattern = patterns.find(entry => entry.id === section.drumPatternId) || patterns[0];
-    if (pattern && sectionBeats > 0) {
-      for (let beatInSection = 0; beatInSection < sectionBeats; beatInSection++) {
-        const stepBase = getSectionSixteenthOffset(beatInSection);
-        for (let subdivision = 0; subdivision < 4; subdivision++) {
-          const step = (stepBase + subdivision) % STEPS;
-          const beat = sectionStartBeat + beatInSection + subdivision / 4;
-          DRUM_LANES.forEach(lane => {
-            if (!pattern.grid[lane.key]?.[step]) return;
-            events.drums.push({
-              beat,
-              laneKey: lane.key,
-              durationBeats: 0.125,
+      const pattern = getDrumPatternById(chord.drumPatternId);
+      if (pattern) {
+        for (let beatInChord = 0; beatInChord < chordBeats; beatInChord++) {
+          const beatInSection = chordBeatOffset + beatInChord;
+          const stepBase = getSectionSixteenthOffset(beatInSection);
+          const beatBase = absoluteChordBeat + beatInChord;
+          for (let subdivision = 0; subdivision < 4; subdivision++) {
+            const step = (stepBase + subdivision) % STEPS;
+            const beat = beatBase + subdivision / 4;
+            DRUM_LANES.forEach(lane => {
+              if (!pattern.grid[lane.key]?.[step]) return;
+              events.drums.push({
+                beat,
+                laneKey: lane.key,
+                durationBeats: 0.125,
+              });
             });
-          });
+          }
         }
       }
-    }
+      chordBeatOffset += chordBeats;
+    });
 
     if (section.rollAtEnd && sectionBeats > 0) {
       const rollStartBeat = sectionStartBeat + sectionBeats - 1;
@@ -2375,6 +2502,7 @@ let schedulerGeneration = 0;
 let nextNoteTime = 0;
 let currentStep = 0;
 let currentBeatStepBase = 0;
+let currentDrumPatternId = null;
 let isBeating = false;
 let songEndedPending = false;
 let playbackCursor = {
@@ -2553,6 +2681,7 @@ function flushScheduledNotes({ restartPlayback = false, snapToChordStart = false
   if (snapToChordStart) snapPlaybackCursorToChordStart();
   currentStep = 0;
   currentBeatStepBase = getSectionSixteenthOffset(playbackCursor.beatInSection);
+  currentDrumPatternId = null;
   nextNoteTime = getAudioCtx().currentTime + 0.05;
   scheduler(schedulerGeneration);
 }
@@ -2756,11 +2885,8 @@ function playDrumLane(key, time) {
   }
 }
 
-function scheduleStep(step, time) {
-  const section = song.sections[playbackCursor.sectionIndex];
-  const patternId = section?.drumPatternId;
-  const patterns = song.drumPatterns || [];
-  const pattern = patterns.find(p => p.id === patternId) || patterns[0];
+function scheduleStep(step, time, patternId = currentDrumPatternId) {
+  const pattern = getDrumPatternById(patternId);
   if (!pattern) return;
   DRUM_LANES.forEach(lane => {
     if (pattern.grid[lane.key]?.[step]) playDrumLane(lane.key, time);
@@ -3346,8 +3472,13 @@ function scheduler(generation = schedulerGeneration) {
   debugState.counters.schedulerTicks += 1;
   while (nextNoteTime < ctx.currentTime + SCHEDULE_AHEAD) {
     const beatSubdivision = currentStep % 4;
-    if (beatSubdivision === 0) currentBeatStepBase = getSectionSixteenthOffset(playbackCursor.beatInSection);
-    scheduleStep((currentBeatStepBase + beatSubdivision) % STEPS, nextNoteTime);
+    if (beatSubdivision === 0) {
+      currentBeatStepBase = getSectionSixteenthOffset(playbackCursor.beatInSection);
+      const section = song.sections[playbackCursor.sectionIndex];
+      const chord = section?.chords?.[playbackCursor.chordIndex];
+      currentDrumPatternId = getChordDrumPatternId(chord, getDefaultDrumPatternId());
+    }
+    scheduleStep((currentBeatStepBase + beatSubdivision) % STEPS, nextNoteTime, currentDrumPatternId);
     if (beatSubdivision === 0 && isBeating) scheduleMusicalBeat(nextNoteTime);
     const secondsPerSixteenth = (60 / song.bpm) / 4;
     nextNoteTime += secondsPerSixteenth;
@@ -3367,6 +3498,7 @@ function startBeat() {
   currentStep = 0;
   initializePlaybackCursor();
   currentBeatStepBase = getSectionSixteenthOffset(playbackCursor.beatInSection);
+  currentDrumPatternId = null;
   nextNoteTime = getAudioCtx().currentTime + 0.05;
   debugLog('Playback started');
   scheduler(schedulerGeneration);
@@ -3408,10 +3540,9 @@ function renderDrumSequencer() {
   const patterns = song.drumPatterns || [];
   if (!patterns.length) return;
 
-  // Ensure editingDrumPatternId is valid; prefer the selected section's pattern
+  // Ensure editingDrumPatternId is valid; prefer the focused chord in the selected section
   if (!editingDrumPatternId || !patterns.some(p => p.id === editingDrumPatternId)) {
-    const selectedSection = song.sections.find(s => s.id === song.selectedSectionId);
-    editingDrumPatternId = selectedSection?.drumPatternId || patterns[0].id;
+    editingDrumPatternId = getPreferredEditingDrumPatternId() || patterns[0].id;
   }
   const pattern = patterns.find(p => p.id === editingDrumPatternId);
 
@@ -3422,7 +3553,7 @@ function renderDrumSequencer() {
   title.textContent = '🥁 Drum Sequencer';
   const helpText = document.createElement('p');
   helpText.className = 'drum-seq-help';
-  helpText.textContent = '8-lane 16th-note grid • Click steps to toggle on/off • Each section can use a different pattern (set in the section options row below)';
+  helpText.textContent = '8-lane 16th-note grid • Click steps to toggle on/off • Each chord can use a different pattern (set on the chord cards below)';
   header.append(title, helpText);
 
   // Controls row: pattern selector + name input
@@ -3459,7 +3590,23 @@ function renderDrumSequencer() {
   nameInput.addEventListener('input', () => updateDrumPatternName(editingDrumPatternId, nameInput.value));
   nameLabel.append(nameText, nameInput);
 
-  controlsRow.append(patternLabel, nameLabel);
+  const patternCopyButton = document.createElement('button');
+  patternCopyButton.type = 'button';
+  patternCopyButton.className = 'mini-action-btn';
+  patternCopyButton.textContent = 'Copy';
+  patternCopyButton.title = 'Copy the currently edited drum pattern';
+  patternCopyButton.setAttribute('aria-label', 'Copy the currently edited drum pattern');
+  patternCopyButton.addEventListener('click', () => copyDrumPattern(editingDrumPatternId));
+
+  const patternPasteButton = document.createElement('button');
+  patternPasteButton.type = 'button';
+  patternPasteButton.className = 'mini-action-btn';
+  patternPasteButton.textContent = 'Paste';
+  patternPasteButton.title = 'Paste the copied drum pattern into the currently edited pattern';
+  patternPasteButton.setAttribute('aria-label', 'Paste the copied drum pattern into the currently edited pattern');
+  patternPasteButton.addEventListener('click', () => pasteDrumPattern(editingDrumPatternId));
+
+  controlsRow.append(patternLabel, nameLabel, patternCopyButton, patternPasteButton);
 
   // Grid container
   const grid = document.createElement('div');
@@ -4043,6 +4190,7 @@ function updateChordCard(sectionId, chordId) {
   const noteCountElement = document.getElementById('note-count-' + chordId);
   const loopEnabledElement = document.getElementById('loop-enabled-' + chordId);
   const arpModeElement = document.getElementById('arp-mode-' + chordId);
+  const drumPatternElement = document.getElementById('drum-pattern-' + chordId);
   if (rootElement) rootElement.textContent = noteName(chord.root);
   if (offsetElement) {
     const offset = formatPitchOffset(chord.root);
@@ -4072,6 +4220,7 @@ function updateChordCard(sectionId, chordId) {
   if (noteCountElement) noteCountElement.value = String(clampInt(chord.noteCount, chordTypeObj(chord.type).intervals.length, 1, 16));
   if (loopEnabledElement) loopEnabledElement.checked = Boolean(chord.loopEnabled);
   if (arpModeElement) arpModeElement.value = ARP_MODES.includes(chord.arpMode) ? chord.arpMode : 'off';
+  if (drumPatternElement) drumPatternElement.value = getChordDrumPatternId(chord, getDefaultDrumPatternId()) || '';
 }
 
 function renderArrangementPanel(sectionId) {
@@ -4202,29 +4351,15 @@ function buildSectionOptionsRow(section) {
   rollCheckbox.addEventListener('change', () => updateSectionOptions(section.id, { rollAtEnd: rollCheckbox.checked }));
   rollLabel.append(rollCheckbox, document.createTextNode('Roll at end'));
 
-  // Drum pattern selector
-  const drumPatternWrap = document.createElement('label');
-  drumPatternWrap.className = 'section-drum-pattern-field';
-  const drumPatternText = document.createElement('span');
-  drumPatternText.textContent = 'Drum pattern';
-  const drumPatternSelect = document.createElement('select');
-  drumPatternSelect.className = 'section-drum-pattern-select';
-  drumPatternSelect.setAttribute('aria-label', 'Drum pattern for this section');
-  (song.drumPatterns || []).forEach(p => {
-    const option = document.createElement('option');
-    option.value = p.id;
-    option.textContent = p.name;
-    if (p.id === section.drumPatternId) option.selected = true;
-    drumPatternSelect.appendChild(option);
-  });
-  drumPatternSelect.addEventListener('change', () => updateSectionDrumPattern(section.id, drumPatternSelect.value));
-  drumPatternWrap.append(drumPatternText, drumPatternSelect);
+  const drumPatternHint = document.createElement('span');
+  drumPatternHint.className = 'section-drum-pattern-field';
+  drumPatternHint.textContent = 'Drums per chord below';
 
   const beatsSummary = document.createElement('span');
   beatsSummary.className = 'section-beat-summary';
   beatsSummary.textContent = `${getSectionBeatLength(section)} beats total`;
 
-  row.append(crashLabel, rollLabel, drumPatternWrap, beatsSummary);
+  row.append(crashLabel, rollLabel, drumPatternHint, beatsSummary);
   return row;
 }
 
@@ -4649,6 +4784,50 @@ function buildChordCard(chord, sectionId) {
 
   articulationRow.append(loopWrap, arpModeWrap);
 
+  const drumPatternRow = document.createElement('div');
+  drumPatternRow.className = 'chord-inline-row';
+
+  const drumPatternWrap = document.createElement('div');
+  drumPatternWrap.className = 'repeat-field';
+  const drumPatternLabel = document.createElement('label');
+  drumPatternLabel.textContent = 'Drums';
+  drumPatternLabel.setAttribute('for', 'drum-pattern-' + chord.id);
+  const drumPatternSelect = document.createElement('select');
+  drumPatternSelect.id = 'drum-pattern-' + chord.id;
+  drumPatternSelect.className = 'repeat-select';
+  drumPatternSelect.setAttribute('aria-label', 'Drum pattern for this chord');
+  (song.drumPatterns || []).forEach(pattern => {
+    const option = document.createElement('option');
+    option.value = pattern.id;
+    option.textContent = pattern.name;
+    if (pattern.id === getChordDrumPatternId(chord, getDefaultDrumPatternId())) option.selected = true;
+    drumPatternSelect.appendChild(option);
+  });
+  drumPatternSelect.addEventListener('change', () => updateChordDrumPattern(sectionId, chord.id, drumPatternSelect.value));
+  drumPatternWrap.append(drumPatternLabel, drumPatternSelect);
+
+  const drumPatternActions = document.createElement('div');
+  drumPatternActions.className = 'mini-action-group';
+
+  const copyDrumButton = document.createElement('button');
+  copyDrumButton.type = 'button';
+  copyDrumButton.className = 'mini-action-btn';
+  copyDrumButton.textContent = 'Copy';
+  copyDrumButton.title = 'Copy this chord drum pattern';
+  copyDrumButton.setAttribute('aria-label', 'Copy this chord drum pattern');
+  copyDrumButton.addEventListener('click', () => copyDrumPatternFromChord(sectionId, chord.id));
+
+  const pasteDrumButton = document.createElement('button');
+  pasteDrumButton.type = 'button';
+  pasteDrumButton.className = 'mini-action-btn';
+  pasteDrumButton.textContent = 'Paste';
+  pasteDrumButton.title = 'Paste the copied drum pattern into this chord drum pattern';
+  pasteDrumButton.setAttribute('aria-label', 'Paste the copied drum pattern into this chord drum pattern');
+  pasteDrumButton.addEventListener('click', () => pasteDrumPatternToChord(sectionId, chord.id));
+
+  drumPatternActions.append(copyDrumButton, pasteDrumButton);
+  drumPatternRow.append(drumPatternWrap, drumPatternActions);
+
   const actionBar = document.createElement('div');
   actionBar.className = 'chord-action-bar';
 
@@ -4659,6 +4838,22 @@ function buildChordCard(chord, sectionId) {
   auditionButton.setAttribute('aria-label', 'Play chord');
   auditionButton.addEventListener('click', () => auditionChord(chord.root, chord.type));
 
+  const copyChordButton = document.createElement('button');
+  copyChordButton.type = 'button';
+  copyChordButton.className = 'mini-action-btn';
+  copyChordButton.textContent = 'Copy';
+  copyChordButton.title = 'Copy this chord configuration';
+  copyChordButton.setAttribute('aria-label', 'Copy this chord configuration');
+  copyChordButton.addEventListener('click', () => copyChordConfiguration(sectionId, chord.id));
+
+  const pasteChordButton = document.createElement('button');
+  pasteChordButton.type = 'button';
+  pasteChordButton.className = 'mini-action-btn';
+  pasteChordButton.textContent = 'Paste';
+  pasteChordButton.title = 'Paste the copied chord configuration';
+  pasteChordButton.setAttribute('aria-label', 'Paste the copied chord configuration');
+  pasteChordButton.addEventListener('click', () => pasteChordConfiguration(sectionId, chord.id));
+
   const removeButton = document.createElement('button');
   removeButton.className = 'remove-chord-btn';
   removeButton.textContent = '✕';
@@ -4666,7 +4861,7 @@ function buildChordCard(chord, sectionId) {
   removeButton.setAttribute('aria-label', 'Remove chord');
   removeButton.addEventListener('click', () => removeChord(sectionId, chord.id));
 
-  actionBar.append(auditionButton, removeButton);
+  actionBar.append(auditionButton, copyChordButton, pasteChordButton, removeButton);
   card.append(
     rootElement,
     offsetElement,
@@ -4687,6 +4882,7 @@ function buildChordCard(chord, sectionId) {
     noteCountRow,
     repeatRow,
     articulationRow,
+    drumPatternRow,
     actionBar,
   );
   return card;
