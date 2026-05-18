@@ -53,6 +53,7 @@
         <button class="action-btn" id="save-btn" title="Save to browser storage">💾 Save</button>
         <button class="action-btn" id="export-btn" title="Export song as JSON file">📤 Export</button>
         <button class="action-btn" id="import-btn" title="Import song from JSON file">📥 Import</button>
+        <button class="action-btn" id="debug-toggle" title="Show debug panel" aria-expanded="false">🐞 Debug ▸</button>
         <button class="action-btn danger" id="new-btn" title="Start a new song">🆕 New</button>
       </div>
 
@@ -88,6 +89,19 @@
     </div>
     <div class="playback-position" id="playback-position">Position: —</div>
   </div>
+
+  <section id="debug-panel" class="debug-panel" aria-label="Debug panel" hidden>
+    <div class="debug-panel-header">
+      <h2>Debug</h2>
+      <div class="debug-panel-actions">
+        <button class="action-btn" id="debug-refresh" type="button">Refresh</button>
+        <button class="action-btn" id="debug-copy" type="button">Copy</button>
+        <button class="action-btn" id="debug-clear-log" type="button">Clear logs</button>
+        <button class="action-btn danger" id="debug-close" type="button">Close</button>
+      </div>
+    </div>
+    <textarea id="debug-output" class="debug-output" readonly aria-label="Debug output"></textarea>
+  </section>
 
   <!-- ===== MIXER ===== -->
   <section id="mixer-panel" class="mixer-panel" aria-label="Mixer controls"></section>
@@ -164,7 +178,13 @@
           <dd>Each chord defaults to 4 beats (1 bar). Change Beats on each chord card to control progression length.</dd>
 
           <dt>🎛️ Chord/Bass sounds</dt>
-          <dd>Chord and bass each have compact 2-oscillator synth panels with presets, waveform selectors (Osc 1/Osc 2), ADSR, filter, harmonic drive (distortion), and simple modulation (rate/depth). The bass panel also includes a <strong>Pitch mode</strong> switch: <strong>Linked</strong> (bass follows chord) or <strong>Free</strong> (independent bass pitch).</dd>
+          <dd>Chord and bass each have compact 2-oscillator synth panels with presets, waveform selectors (Osc 1/Osc 2), per-synth <strong>Transpose</strong>, ADSR, filter, harmonic drive (distortion), simple modulation (rate/depth), and tone shaping controls (Osc2 interval, detune, mix). The bass panel also includes a <strong>Pitch mode</strong> switch: <strong>Linked</strong> (bass follows chord) or <strong>Free</strong> (independent bass pitch).</dd>
+
+          <dt>↻ Chord cycle</dt>
+          <dd>Use the <strong>↻ On/Off</strong> button on each chord card to arpeggiate that chord during playback without changing other chords.</dd>
+
+          <dt>🐞 Debug panel</dt>
+          <dd>Use the header <strong>Debug</strong> button to open a copyable runtime snapshot for transport/audio diagnostics.</dd>
 
           <dt>🎚️ Mixer + Reverb</dt>
           <dd>Use Mixer to balance chord/bass/<strong>drum</strong>/output levels. The <strong>Drums</strong> slider controls the volume of all drum sequencer lanes as well as crash and roll sounds. Each synth has its own Reverb wet/dry slider, so chord and bass ambience can be shaped independently.</dd>

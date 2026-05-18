@@ -253,6 +253,10 @@ const LEGACY_BASS_PRESET_MAP = {
 };
 
 const SYNTH_UI_FIELDS = [
+  { key: 'transpose', label: 'Transpose', min: -24, max: 24, step: 1, format: value => `${value > 0 ? '+' : ''}${Math.round(value)} st` },
+  { key: 'osc2Interval', label: 'Osc2 Int', min: -24, max: 24, step: 1, format: value => `${Math.round(value)} st` },
+  { key: 'detune', label: 'Detune', min: -60, max: 60, step: 1, format: value => `${value > 0 ? '+' : ''}${Math.round(value)}¢` },
+  { key: 'mix', label: 'Mix', min: 0, max: 1, step: 0.01, format: value => Math.round(value * 100) + '%' },
   { key: 'attack', label: 'A', min: 0.005, max: 1.5, step: 0.005, format: value => value.toFixed(2) + 's' },
   { key: 'decay', label: 'D', min: 0.02, max: 2.0, step: 0.01, format: value => value.toFixed(2) + 's' },
   { key: 'sustain', label: 'S', min: 0.0, max: 1.0, step: 0.01, format: value => Math.round(value * 100) + '%' },
@@ -332,6 +336,7 @@ function createSynthSettings(kind, presetId) {
     osc2Interval: preset.osc2Interval,
     detune: preset.detune,
     mix: preset.mix,
+    transpose: 0,
     attack: preset.attack,
     decay: preset.decay,
     sustain: preset.sustain,
@@ -359,6 +364,7 @@ function normalizeSynthSettings(kind, rawSynth, legacyPreset) {
     osc2Interval: clampInt(synth.osc2Interval, base.osc2Interval, -24, 24),
     detune: clampNumber(synth.detune, base.detune, -60, 60),
     mix: clampNumber(synth.mix, base.mix, 0, 1),
+    transpose: clampInt(synth.transpose, base.transpose, -24, 24),
     attack: clampNumber(synth.attack, base.attack, 0.005, 1.5),
     decay: clampNumber(synth.decay, base.decay, 0.02, 2.0),
     sustain: clampNumber(synth.sustain, base.sustain, 0, 1),
@@ -445,6 +451,7 @@ function createChord(root = DEFAULT_CHORD_ROOT, type = 'maj') {
     chordRepeat: 1,
     bassRepeat: 1,
     startBeat: 1,
+    cycle: false,
   };
 }
 
@@ -500,6 +507,24 @@ let songVersion = 0;
 const synthPanelExpanded = { chord: true, bass: true };
 let editingDrumPatternId = null;
 let activePitchTarget = null;
+let debugPanelOpen = false;
+let debugRefreshTimer = null;
+let songEndTimeout = null;
+
+const debugState = {
+  logs: [],
+  maxLogs: 80,
+  counters: {
+    voicesCreated: 0,
+    voicesEnded: 0,
+    nodeCleanups: 0,
+    schedulerTicks: 0,
+  },
+};
+
+const activeAudioNodes = new Set();
+let activeVoiceCount = 0;
+const noiseBufferCache = new Map();
 
 function setActivePitchTarget(sectionId, chordId, kind = 'chord') {
   if (!sectionId || !chordId) return;
@@ -540,6 +565,7 @@ function normalizeChord(rawChord) {
     chordRepeat: normalizeRepeat(chord.chordRepeat, 1),
     bassRepeat: normalizeRepeat(chord.bassRepeat, 1),
     startBeat: normalizeStartBeat(chord.startBeat, 1),
+    cycle: Boolean(chord.cycle),
   };
 }
 
@@ -837,7 +863,8 @@ function updateSynthField(kind, fieldKey, value) {
   const synth = kind === 'bass' ? song.bassSynth : song.chordSynth;
   const field = SYNTH_UI_FIELDS.find(entry => entry.key === fieldKey);
   if (!synth || !field) return;
-  synth[fieldKey] = clampNumber(value, synth[fieldKey], field.min, field.max);
+  const clamped = clampNumber(value, synth[fieldKey], field.min, field.max);
+  synth[fieldKey] = field.step >= 1 ? Math.round(clamped) : clamped;
   synth.preset = 'custom';
   if (kind === 'bass') song.bassSound = 'custom';
   else song.chordSound = 'custom';
@@ -929,6 +956,12 @@ function updateBassRepeat(sectionId, chordId, repeat) {
 function updateChordStartBeat(sectionId, chordId, startBeat) {
   mutateChord(sectionId, chordId, chord => {
     chord.startBeat = normalizeStartBeat(startBeat, chord.startBeat || 1);
+  }, { refreshCursor: true });
+}
+
+function updateChordCycle(sectionId, chordId, enabled) {
+  mutateChord(sectionId, chordId, chord => {
+    chord.cycle = Boolean(enabled);
   }, { refreshCursor: true });
 }
 
@@ -1430,12 +1463,75 @@ function applyAudioMixSettings() {
   }
 }
 
+function debugLog(message, level = 'info') {
+  const time = new Date().toISOString().slice(11, 19);
+  debugState.logs.push(`[${time}] [${level}] ${message}`);
+  if (debugState.logs.length > debugState.maxLogs) debugState.logs.splice(0, debugState.logs.length - debugState.maxLogs);
+  if (debugPanelOpen) updateDebugPanelOutput();
+}
+
+function disconnectNode(node) {
+  if (!node || typeof node.disconnect !== 'function') return;
+  try {
+    node.disconnect();
+  } catch (_) {
+    // no-op
+  }
+}
+
+function cleanupAudioNodeEntry(entry, voiceEnded = false) {
+  if (!entry || entry.cleaned) return;
+  entry.cleaned = true;
+  entry.nodes.forEach(disconnectNode);
+  debugState.counters.nodeCleanups += entry.nodes.length;
+  if (entry.kind === 'voice') {
+    activeVoiceCount = Math.max(0, activeVoiceCount - 1);
+    if (voiceEnded) debugState.counters.voicesEnded += 1;
+  }
+  activeAudioNodes.delete(entry);
+}
+
+function registerAudioNodeEntry(sources, nodes, kind = 'generic') {
+  const validSources = (Array.isArray(sources) ? sources : []).filter(Boolean);
+  const validNodes = (Array.isArray(nodes) ? nodes : []).filter(Boolean);
+  const entry = { sources: validSources, nodes: validNodes, kind, cleaned: false };
+  if (kind === 'voice') {
+    activeVoiceCount += 1;
+    debugState.counters.voicesCreated += 1;
+  }
+  const onEnded = () => cleanupAudioNodeEntry(entry, true);
+  validSources.forEach(source => source.addEventListener('ended', onEnded, { once: true }));
+  activeAudioNodes.add(entry);
+  return entry;
+}
+
+function stopAndClearActiveAudioNodes() {
+  activeAudioNodes.forEach(entry => {
+    entry.sources.forEach(source => {
+      if (!source || typeof source.stop !== 'function') return;
+      try {
+        source.stop();
+      } catch (_) {
+        // already stopped
+      }
+    });
+    cleanupAudioNodeEntry(entry, false);
+  });
+}
+
+function getSynthTranspose(synthSettings) {
+  return clampInt(synthSettings?.transpose, 0, -24, 24);
+}
+
 function createNoiseBuffer(duration) {
   const ctx = getAudioCtx();
+  const cacheKey = `${ctx.sampleRate}:${Math.round(duration * 1000)}`;
+  if (noiseBufferCache.has(cacheKey)) return noiseBufferCache.get(cacheKey);
   const length = Math.floor(ctx.sampleRate * duration);
   const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
   const data = buffer.getChannelData(0);
   for (let index = 0; index < length; index++) data[index] = Math.random() * 2 - 1;
+  noiseBufferCache.set(cacheKey, buffer);
   return buffer;
 }
 
@@ -1451,6 +1547,7 @@ function playKick(time) {
   gain.gain.setValueAtTime(0.0001, time);
   gain.gain.linearRampToValueAtTime(1.05, time + 0.004);
   gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.35);
+  registerAudioNodeEntry([osc], [osc, gain], 'drum');
   osc.start(time);
   osc.stop(time + 0.35);
 }
@@ -1470,6 +1567,7 @@ function playSnare(time) {
   noiseGain.gain.setValueAtTime(0.0001, time);
   noiseGain.gain.linearRampToValueAtTime(0.65, time + 0.002);
   noiseGain.gain.exponentialRampToValueAtTime(0.0001, time + 0.14);
+  registerAudioNodeEntry([noise], [noise, noiseFilter, noiseGain], 'drum');
   noise.start(time);
   noise.stop(time + 0.16);
 
@@ -1483,6 +1581,7 @@ function playSnare(time) {
   oscGain.gain.setValueAtTime(0.0001, time);
   oscGain.gain.linearRampToValueAtTime(0.36, time + 0.002);
   oscGain.gain.exponentialRampToValueAtTime(0.0001, time + 0.09);
+  registerAudioNodeEntry([osc], [osc, oscGain], 'drum');
   osc.start(time);
   osc.stop(time + 0.09);
 }
@@ -1502,6 +1601,7 @@ function playClosedHat(time) {
   gain.gain.setValueAtTime(0.0001, time);
   gain.gain.linearRampToValueAtTime(0.2, time + 0.001);
   gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.045);
+  registerAudioNodeEntry([noise], [noise, filter, gain], 'drum');
   noise.start(time);
   noise.stop(time + 0.05);
 }
@@ -1523,6 +1623,7 @@ function playOpenHat(time) {
   gain.gain.setValueAtTime(0.0001, time);
   gain.gain.linearRampToValueAtTime(0.28, time + 0.002);
   gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.4);
+  registerAudioNodeEntry([noise], [noise, filter, gain], 'drum');
   noise.start(time);
   noise.stop(time + 0.45);
 }
@@ -1539,6 +1640,7 @@ function playHighTom(time) {
   gain.gain.setValueAtTime(0.0001, time);
   gain.gain.linearRampToValueAtTime(0.75, time + 0.003);
   gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.22);
+  registerAudioNodeEntry([osc], [osc, gain], 'drum');
   osc.start(time);
   osc.stop(time + 0.25);
 }
@@ -1555,6 +1657,7 @@ function playMidTom(time) {
   gain.gain.setValueAtTime(0.0001, time);
   gain.gain.linearRampToValueAtTime(0.75, time + 0.003);
   gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.28);
+  registerAudioNodeEntry([osc], [osc, gain], 'drum');
   osc.start(time);
   osc.stop(time + 0.32);
 }
@@ -1571,6 +1674,7 @@ function playLowTom(time) {
   gain.gain.setValueAtTime(0.0001, time);
   gain.gain.linearRampToValueAtTime(0.8, time + 0.004);
   gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.34);
+  registerAudioNodeEntry([osc], [osc, gain], 'drum');
   osc.start(time);
   osc.stop(time + 0.38);
 }
@@ -1583,6 +1687,8 @@ function playRide(time) {
   masterGain.gain.setValueAtTime(0.0001, time);
   masterGain.gain.linearRampToValueAtTime(0.18, time + 0.002);
   masterGain.gain.exponentialRampToValueAtTime(0.0001, time + 0.28);
+  const rideOscillators = [];
+  const rideNodes = [masterGain];
   [560, 845, 1174, 1523, 1780].forEach(freq => {
     const osc = ctx.createOscillator();
     const g = ctx.createGain();
@@ -1591,9 +1697,12 @@ function playRide(time) {
     osc.frequency.value = freq;
     osc.connect(g);
     g.connect(masterGain);
+    rideOscillators.push(osc);
+    rideNodes.push(osc, g);
     osc.start(time);
     osc.stop(time + 0.3);
   });
+  registerAudioNodeEntry(rideOscillators, rideNodes, 'drum');
 }
 
 function playDrumLane(key, time) {
@@ -1640,6 +1749,7 @@ function playCrash(time) {
   gain.gain.setValueAtTime(0.0001, time);
   gain.gain.linearRampToValueAtTime(0.45, time + 0.003);
   gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.8);
+  registerAudioNodeEntry([source], [source, highpass, bandpass, gain], 'drum');
   source.start(time);
   source.stop(time + 0.8);
 }
@@ -1692,8 +1802,9 @@ function playSynthVoice(freq, time, duration, synthSettings, kind = 'chord') {
   filter.frequency.setValueAtTime(synthSettings.cutoff, time);
   filter.Q.setValueAtTime(synthSettings.resonance, time);
   const driveAmount = clampNumber(synthSettings.distortion, 0, 0, 1);
+  let shaper = null;
   if (driveAmount > 0.001) {
-    const shaper = ctx.createWaveShaper();
+    shaper = ctx.createWaveShaper();
     shaper.curve = getDistortionCurve(driveAmount);
     shaper.oversample = '2x';
     filter.connect(shaper);
@@ -1722,10 +1833,13 @@ function playSynthVoice(freq, time, duration, synthSettings, kind = 'chord') {
 
   const modRate = clampNumber(synthSettings.modRate, 0, 0, 12);
   const modDepth = clampNumber(synthSettings.modDepth, 0, 0, 80);
+  let lfo = null;
+  let lfoGain1 = null;
+  let lfoGain2 = null;
   if (modRate > 0.01 && modDepth > 0.01) {
-    const lfo = ctx.createOscillator();
-    const lfoGain1 = ctx.createGain();
-    const lfoGain2 = ctx.createGain();
+    lfo = ctx.createOscillator();
+    lfoGain1 = ctx.createGain();
+    lfoGain2 = ctx.createGain();
     const depthHz1 = freq * (Math.pow(2, modDepth / 1200) - 1);
     const freq2 = freq * Math.pow(2, (synthSettings.osc2Interval * 100 + synthSettings.detune) / 1200);
     const depthHz2 = freq2 * (Math.pow(2, modDepth / 1200) - 1);
@@ -1737,7 +1851,6 @@ function playSynthVoice(freq, time, duration, synthSettings, kind = 'chord') {
     lfoGain1.connect(osc1.frequency);
     lfoGain2.connect(osc2.frequency);
     lfo.start(time);
-    lfo.stop(time + Math.max(duration, 0.1) + Math.max(0.05, synthSettings.release) + 0.05);
   }
 
   const noteEnd = scheduleADSR(
@@ -1755,16 +1868,43 @@ function playSynthVoice(freq, time, duration, synthSettings, kind = 'chord') {
   osc2.start(time);
   osc1.stop(noteEnd + 0.02);
   osc2.stop(noteEnd + 0.02);
+  if (lfo) lfo.stop(noteEnd + 0.02);
+  const sources = [osc1, osc2];
+  const nodes = [voiceGain, filter, osc1, osc2, mix1, mix2];
+  if (shaper) nodes.push(shaper);
+  if (lfo) {
+    sources.push(lfo);
+    nodes.push(lfo, lfoGain1, lfoGain2);
+  }
+  registerAudioNodeEntry(sources, nodes, 'voice');
 }
 
-function playChordNotes(rootSemitone, typeName, when, beats = 4, repeats = 1, startBeat = 1) {
+function playChordNotes(rootSemitone, typeName, when, beats = 4, repeats = 1, startBeat = 1, cycle = false) {
   const chordType = chordTypeObj(typeName);
-  const rootMidi = 60 + rootSemitone;
+  const rootMidi = 60 + rootSemitone + getSynthTranspose(song.chordSynth);
   const totalBeats = clampInt(beats, 4, 1, 64);
   const repeatCount = normalizeRepeat(repeats, 1);
   const effectiveStartBeat = Math.min(totalBeats, normalizeStartBeat(startBeat, 1));
   const startOffsetBeats = effectiveStartBeat - 1;
   const activeBeats = Math.max(0.25, totalBeats - startOffsetBeats);
+  if (cycle && chordType.intervals.length) {
+    const noteCount = chordType.intervals.length;
+    const stepCount = Math.max(1, noteCount * repeatCount);
+    const stepBeats = Math.max(0.125, activeBeats / stepCount);
+    const stepDuration = Math.max(0.08, beatsToSeconds(stepBeats) * 0.86);
+    for (let step = 0; step < stepCount; step++) {
+      const interval = chordType.intervals[step % noteCount];
+      const hitTime = when + beatOffsetToSeconds(startOffsetBeats + step * stepBeats);
+      playSynthVoice(
+        frequencyFromMidi(rootMidi + interval),
+        hitTime,
+        stepDuration,
+        song.chordSynth,
+        'chord',
+      );
+    }
+    return;
+  }
   const hitBeats = Math.max(0.25, activeBeats / repeatCount);
   const hitDuration = Math.max(0.1, beatsToSeconds(hitBeats) * 0.92);
   for (let hit = 0; hit < repeatCount; hit++) {
@@ -1782,7 +1922,7 @@ function playChordNotes(rootSemitone, typeName, when, beats = 4, repeats = 1, st
 }
 
 function playBassNote(rootSemitone, when, beats = 4, repeats = 1, startBeat = 1) {
-  const bassMidi = 36 + rootSemitone;
+  const bassMidi = 36 + rootSemitone + getSynthTranspose(song.bassSynth);
   const totalBeats = clampInt(beats, 4, 1, 64);
   const repeatCount = normalizeRepeat(repeats, 1);
   const effectiveStartBeat = Math.min(totalBeats, normalizeStartBeat(startBeat, 1));
@@ -2003,7 +2143,7 @@ function scheduleMusicalBeat(time) {
   if (playbackCursor.beatInSection === 0 && section.crashOnStart) playCrash(time);
   if (playbackCursor.beatInChord === 0) {
     const chordStartBeat = getChordPlaybackStartBeat(chord);
-    playChordNotes(chord.root, chord.type, time, chord.beats || 4, chord.chordRepeat || 1, chordStartBeat);
+    playChordNotes(chord.root, chord.type, time, chord.beats || 4, chord.chordRepeat || 1, chordStartBeat, chord.cycle === true);
     if (song.bassEnabled) playBassNote(getChordBassRoot(chord), time, chord.beats || 4, chord.bassRepeat || 1, chordStartBeat);
   }
 
@@ -2016,17 +2156,24 @@ function scheduleMusicalBeat(time) {
   if (songEndedPending) {
     songEndedPending = false;
     const delay = Math.max(0, (time - getAudioCtx().currentTime) * 1000);
-    setTimeout(() => {
+    if (songEndTimeout !== null) clearTimeout(songEndTimeout);
+    songEndTimeout = setTimeout(() => {
       stopBeat();
       stopIndicatorFlash();
       const positionElement = document.getElementById('playback-position');
       if (positionElement) positionElement.textContent += ' • End';
+      songEndTimeout = null;
     }, delay + 20);
   }
 }
 
 function scheduler() {
+  if (!isBeating) {
+    schedulerTimer = null;
+    return;
+  }
   const ctx = getAudioCtx();
+  debugState.counters.schedulerTicks += 1;
   while (nextNoteTime < ctx.currentTime + SCHEDULE_AHEAD) {
     scheduleStep(currentStep, nextNoteTime);
     if (currentStep % 4 === 0 && isBeating) scheduleMusicalBeat(nextNoteTime);
@@ -2034,7 +2181,8 @@ function scheduler() {
     nextNoteTime += secondsPerSixteenth;
     currentStep = (currentStep + 1) % STEPS;
   }
-  schedulerTimer = setTimeout(scheduler, LOOKAHEAD_MS);
+  if (isBeating) schedulerTimer = setTimeout(scheduler, LOOKAHEAD_MS);
+  else schedulerTimer = null;
 }
 
 function startBeat() {
@@ -2044,6 +2192,7 @@ function startBeat() {
   currentStep = 0;
   initializePlaybackCursor();
   nextNoteTime = getAudioCtx().currentTime + 0.05;
+  debugLog('Playback started');
   scheduler();
   document.getElementById('beat-start').disabled = true;
   document.getElementById('beat-stop').disabled = false;
@@ -2057,6 +2206,12 @@ function stopBeat() {
     clearTimeout(schedulerTimer);
     schedulerTimer = null;
   }
+  if (songEndTimeout !== null) {
+    clearTimeout(songEndTimeout);
+    songEndTimeout = null;
+  }
+  stopAndClearActiveAudioNodes();
+  debugLog('Playback stopped');
   document.getElementById('beat-start').disabled = false;
   document.getElementById('beat-stop').disabled = true;
   document.getElementById('beat-indicator').classList.remove('playing');
@@ -2066,7 +2221,7 @@ function stopBeat() {
 
 function auditionChord(rootSemitone, typeName) {
   const chordType = chordTypeObj(typeName);
-  const rootMidi = 60 + rootSemitone;
+  const rootMidi = 60 + rootSemitone + getSynthTranspose(song.chordSynth);
   chordType.intervals.forEach((interval, index) => {
     const when = getAudioCtx().currentTime + index * 0.08;
     playSynthVoice(frequencyFromMidi(rootMidi + interval), when, 0.8, song.chordSynth);
@@ -2426,7 +2581,7 @@ function buildSynthCard(kind) {
   title.textContent = kind === 'bass' ? 'Bass synth' : 'Chord synth';
   const subtitle = document.createElement('p');
   subtitle.className = 'synth-subtitle';
-  subtitle.textContent = '2 osc • wave • ADSR • filter • drive • mod • reverb';
+  subtitle.textContent = '2 osc • transpose • ADSR • filter • drive • mod • tone • reverb';
   titleWrap.append(title, subtitle);
 
   const controls = document.createElement('div');
@@ -2661,6 +2816,7 @@ function updateChordCard(sectionId, chordId) {
   const startBeatElement = document.getElementById('start-beat-' + chordId);
   const chordRepeatElement = document.getElementById('chord-repeat-' + chordId);
   const bassRepeatElement = document.getElementById('bass-repeat-' + chordId);
+  const cycleButtonElement = document.getElementById('cycle-chord-' + chordId);
   if (rootElement) rootElement.textContent = noteName(chord.root);
   if (offsetElement) {
     const offset = formatPitchOffset(chord.root);
@@ -2680,6 +2836,13 @@ function updateChordCard(sectionId, chordId) {
   if (startBeatElement) startBeatElement.value = String(normalizeStartBeat(chord.startBeat, 1));
   if (chordRepeatElement) chordRepeatElement.value = String(chord.chordRepeat || 1);
   if (bassRepeatElement) bassRepeatElement.value = String(chord.bassRepeat || 1);
+  if (cycleButtonElement) {
+    const enabled = Boolean(chord.cycle);
+    cycleButtonElement.textContent = enabled ? '↻ On' : '↻ Off';
+    cycleButtonElement.setAttribute('aria-pressed', String(enabled));
+    cycleButtonElement.title = enabled ? 'Disable chord cycle' : 'Enable chord cycle';
+    cycleButtonElement.classList.toggle('active', enabled);
+  }
 }
 
 function renderArrangementPanel(sectionId) {
@@ -3154,7 +3317,17 @@ function buildChordCard(chord, sectionId) {
   removeButton.setAttribute('aria-label', 'Remove chord');
   removeButton.addEventListener('click', () => removeChord(sectionId, chord.id));
 
-  actionBar.append(auditionButton, removeButton);
+  const cycleButton = document.createElement('button');
+  cycleButton.id = 'cycle-chord-' + chord.id;
+  cycleButton.className = 'cycle-chord-btn';
+  cycleButton.textContent = chord.cycle ? '↻ On' : '↻ Off';
+  cycleButton.title = chord.cycle ? 'Disable chord cycle' : 'Enable chord cycle';
+  cycleButton.setAttribute('aria-label', 'Toggle chord cycle');
+  cycleButton.setAttribute('aria-pressed', String(Boolean(chord.cycle)));
+  if (chord.cycle) cycleButton.classList.add('active');
+  cycleButton.addEventListener('click', () => updateChordCycle(sectionId, chord.id, !chord.cycle));
+
+  actionBar.append(auditionButton, cycleButton, removeButton);
   card.append(rootElement, offsetElement, bassRootElement, bassOffsetElement, qualityElement, divider1, noteRow, bassRow, typeRow, transposeRow, divider2, beatsRow, startBeatRow, repeatRow, actionBar);
   return card;
 }
@@ -3223,6 +3396,7 @@ function updatePlaybackHighlights() {
 let _flashInterval = null;
 
 function startIndicatorFlash() {
+  stopIndicatorFlash();
   const secondsPerSixteenth = () => (60 / song.bpm) / 4;
   _flashInterval = setInterval(() => {
     if (!isBeating) return;
@@ -3240,6 +3414,84 @@ function stopIndicatorFlash() {
   }
 }
 
+function getCurrentPlaybackPoint() {
+  const section = song.sections[playbackCursor.sectionIndex];
+  const chord = section?.chords?.[playbackCursor.chordIndex];
+  return {
+    sectionName: section?.name || '—',
+    sectionIndex: playbackCursor.sectionIndex,
+    chordName: chord ? `${formatPitchLabel(chord.root)}${chord.type}` : '—',
+    chordIndex: playbackCursor.chordIndex,
+    beatInChord: playbackCursor.beatInChord + 1,
+    chordBeats: chord?.beats || 0,
+  };
+}
+
+function buildDebugSnapshotText() {
+  const point = getCurrentPlaybackPoint();
+  const mode = song.playbackMode || 'edit';
+  const ctxState = audioCtx ? audioCtx.state : 'not-created';
+  return [
+    `time=${new Date().toISOString()}`,
+    `transport isBeating=${isBeating} mode=${mode} bpm=${song.bpm}`,
+    `scheduler timerActive=${schedulerTimer !== null} nextNoteTime=${nextNoteTime.toFixed(4)} currentStep=${currentStep}`,
+    `playback section="${point.sectionName}" sectionIndex=${point.sectionIndex} chord="${point.chordName}" chordIndex=${point.chordIndex} beat=${point.beatInChord}/${point.chordBeats || '—'}`,
+    `audioContext state=${ctxState} sampleRate=${audioCtx?.sampleRate || '—'}`,
+    `voices active=${activeVoiceCount} trackedAudioNodes=${activeAudioNodes.size}`,
+    `counters voicesCreated=${debugState.counters.voicesCreated} voicesEnded=${debugState.counters.voicesEnded} nodeCleanups=${debugState.counters.nodeCleanups} schedulerTicks=${debugState.counters.schedulerTicks}`,
+    `chordSynth transpose=${getSynthTranspose(song.chordSynth)} preset=${song.chordSynth?.preset || '—'}`,
+    `bassSynth transpose=${getSynthTranspose(song.bassSynth)} preset=${song.bassSynth?.preset || '—'} enabled=${Boolean(song.bassEnabled)}`,
+    '',
+    '[recent logs]',
+    ...(debugState.logs.length ? debugState.logs.slice(-25) : ['(no logs yet)']),
+  ].join('\n');
+}
+
+function updateDebugPanelOutput() {
+  const output = document.getElementById('debug-output');
+  if (!output) return;
+  output.value = buildDebugSnapshotText();
+}
+
+function setDebugPanelOpen(open) {
+  debugPanelOpen = Boolean(open);
+  const panel = document.getElementById('debug-panel');
+  const toggle = document.getElementById('debug-toggle');
+  if (!panel || !toggle) return;
+  panel.classList.toggle('open', debugPanelOpen);
+  panel.hidden = !debugPanelOpen;
+  toggle.setAttribute('aria-expanded', String(debugPanelOpen));
+  toggle.textContent = debugPanelOpen ? '🐞 Debug ▾' : '🐞 Debug ▸';
+  if (debugRefreshTimer !== null) {
+    clearInterval(debugRefreshTimer);
+    debugRefreshTimer = null;
+  }
+  if (debugPanelOpen) {
+    updateDebugPanelOutput();
+    debugRefreshTimer = setInterval(updateDebugPanelOutput, 400);
+  }
+}
+
+function copyDebugOutput() {
+  const output = document.getElementById('debug-output');
+  if (!output) return;
+  const text = output.value || buildDebugSnapshotText();
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).then(
+      () => debugLog('Debug snapshot copied'),
+      () => {
+        output.select();
+        document.execCommand('copy');
+        debugLog('Debug snapshot copied');
+      },
+    );
+    return;
+  }
+  output.select();
+  document.execCommand('copy');
+  debugLog('Debug snapshot copied');
+}
+
 // =====================================================================
 // EVENT LISTENERS & BOOT
 // =====================================================================
@@ -3248,7 +3500,20 @@ document.addEventListener('DOMContentLoaded', () => {
   loadSong();
   song = normalizeSong(song);
   render();
+  debugLog('App loaded');
   document.addEventListener('keydown', handlePitchArrowKey);
+  window.addEventListener('error', event => debugLog(`Error: ${event.message}`, 'error'));
+  window.addEventListener('unhandledrejection', event => debugLog(`Unhandled rejection: ${event.reason}`, 'error'));
+
+  document.getElementById('debug-toggle').addEventListener('click', () => setDebugPanelOpen(!debugPanelOpen));
+  document.getElementById('debug-close').addEventListener('click', () => setDebugPanelOpen(false));
+  document.getElementById('debug-refresh').addEventListener('click', updateDebugPanelOutput);
+  document.getElementById('debug-copy').addEventListener('click', copyDebugOutput);
+  document.getElementById('debug-clear-log').addEventListener('click', () => {
+    debugState.logs = [];
+    updateDebugPanelOutput();
+  });
+  setDebugPanelOpen(false);
 
   document.getElementById('song-title').addEventListener('input', saveSong);
   document.getElementById('song-title').addEventListener('blur', () => {
