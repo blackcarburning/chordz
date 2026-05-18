@@ -962,7 +962,7 @@ function updateChordStartBeat(sectionId, chordId, startBeat) {
 function updateChordCycle(sectionId, chordId, enabled) {
   mutateChord(sectionId, chordId, chord => {
     chord.cycle = Boolean(enabled);
-  }, { refreshCursor: true });
+  });
 }
 
 function noteUp(sectionId, chordId) {
@@ -1888,26 +1888,31 @@ function playChordNotes(rootSemitone, typeName, when, beats = 4, repeats = 1, st
   const startOffsetBeats = effectiveStartBeat - 1;
   const activeBeats = Math.max(0.25, totalBeats - startOffsetBeats);
   if (cycle && chordType.intervals.length) {
-    const noteCount = chordType.intervals.length;
-    const stepBeats = Math.max(0.125, 1 / (noteCount * repeatCount));
-    const stepCount = Math.max(1, Math.ceil(activeBeats / stepBeats));
+    const intervals = chordType.intervals;
+    const noteCount = intervals.length;
+    // Use an 8th-note step (half a beat) for clearly audible, musical cycling.
+    // beatOffsetToSeconds correctly handles sub-beat values (unlike beatsToSeconds
+    // which clamps to a minimum of 1 beat, causing heavy note overlap).
+    const stepBeats = 0.5;
+    const stepSeconds = beatOffsetToSeconds(stepBeats);
+    const noteDuration = Math.max(0.05, stepSeconds * 0.88);
+    const blockStartTime = when + beatOffsetToSeconds(startOffsetBeats);
     const blockEndTime = when + beatOffsetToSeconds(totalBeats);
-    const baseStepDuration = Math.max(0.08, beatsToSeconds(stepBeats) * 0.86);
-    for (let step = 0; step < stepCount; step++) {
-      const hitBeat = startOffsetBeats + step * stepBeats;
-      if (hitBeat >= totalBeats) break;
-      const interval = chordType.intervals[step % noteCount];
-      const hitTime = when + beatOffsetToSeconds(hitBeat);
-      const remainingDuration = blockEndTime - hitTime;
-      if (remainingDuration <= 0) break;
-      const stepDuration = Math.min(baseStepDuration, Math.max(0.04, remainingDuration * 0.98));
+    let step = 0;
+    let hitTime = blockStartTime;
+    while (hitTime < blockEndTime - 0.01) {
+      const remaining = blockEndTime - hitTime;
+      if (remaining <= 0.01) break;
+      const actualDuration = Math.min(noteDuration, Math.max(0.04, remaining * 0.95));
       playSynthVoice(
-        frequencyFromMidi(rootMidi + interval),
+        frequencyFromMidi(rootMidi + intervals[step % noteCount]),
         hitTime,
-        stepDuration,
+        actualDuration,
         song.chordSynth,
         'chord',
       );
+      step++;
+      hitTime += stepSeconds;
     }
     return;
   }
