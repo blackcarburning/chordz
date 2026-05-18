@@ -702,11 +702,7 @@ function movePlaybackToActiveLoopTarget({ rescheduleAudio = false } = {}) {
   if (!targetPoint) return false;
   setPlaybackCursorFromPoint(targetPoint.point, targetPoint.index);
   songEndedPending = false;
-  if (rescheduleAudio && isBeating) {
-    stopAndClearActiveAudioNodes();
-    currentStep = 0;
-    nextNoteTime = getAudioCtx().currentTime + 0.05;
-  }
+  if (rescheduleAudio && isBeating) flushScheduledNotes({ restartPlayback: true });
   updatePlaybackPositionUI(playbackCursor.sectionIndex, playbackCursor.chordIndex, playbackCursor.beatInChord, playbackCursor.songBeatIndex);
   return true;
 }
@@ -924,17 +920,18 @@ function beatOffsetToSeconds(beats) {
 // SONG MUTATIONS
 // =====================================================================
 
-function commitSong({ rerender = false, refreshCursor = false } = {}) {
+function commitSong({ rerender = false, refreshCursor = false, flushNoteBuffer = false } = {}) {
   songVersion += 1;
   saveSong();
   applyAudioMixSettings();
+  if (refreshCursor && isBeating && !rerender) initializePlaybackCursor();
+  if (flushNoteBuffer) flushScheduledNotes({ restartPlayback: isBeating });
   if (rerender) {
     render();
     return;
   }
   updateSongGoToControl();
   updatePlaybackHighlights();
-  if (refreshCursor && isBeating) initializePlaybackCursor();
 }
 
 function addSection(type) {
@@ -1032,30 +1029,30 @@ function setSynthPreset(kind, presetId) {
     song.chordSound = resolved;
     song.chordSynth = createSynthSettings('chord', resolved);
   }
-  commitSong();
+  commitSong({ flushNoteBuffer: true });
   renderSynthRack();
 }
 
 function setBassEnabled(enabled) {
   song.bassEnabled = Boolean(enabled);
-  commitSong();
+  commitSong({ flushNoteBuffer: true });
 }
 
 function setBassPitchMode(mode) {
   if (!BASS_PITCH_MODES.includes(mode)) return;
   song.bassPitchMode = mode;
-  commitSong({ rerender: true, refreshCursor: true });
+  commitSong({ rerender: true, refreshCursor: true, flushNoteBuffer: true });
 }
 
 function setStringEnabled(enabled) {
   song.stringEnabled = Boolean(enabled);
-  commitSong();
+  commitSong({ flushNoteBuffer: true });
 }
 
 function setStringPitchMode(mode) {
   if (!STRING_PITCH_MODES.includes(mode)) return;
   song.stringPitchMode = mode;
-  commitSong({ rerender: true, refreshCursor: true });
+  commitSong({ rerender: true, refreshCursor: true, flushNoteBuffer: true });
 }
 
 function setSynthPanelExpanded(kind, expanded) {
@@ -1074,7 +1071,7 @@ function updateSynthField(kind, fieldKey, value) {
   if (kind === 'bass') song.bassSound = 'custom';
   else if (kind === 'string') song.stringSound = 'custom';
   else song.chordSound = 'custom';
-  commitSong();
+  commitSong({ flushNoteBuffer: true });
   const presetSelect = document.getElementById(`${kind}-preset-select`);
   if (presetSelect) presetSelect.value = 'custom';
 }
@@ -1090,7 +1087,7 @@ function updateSynthWaveform(kind, fieldKey, value) {
   if (kind === 'bass') song.bassSound = 'custom';
   else if (kind === 'string') song.stringSound = 'custom';
   else song.chordSound = 'custom';
-  commitSong();
+  commitSong({ flushNoteBuffer: true });
   renderSynthRack();
 }
 
@@ -1136,7 +1133,7 @@ function mutateChord(sectionId, chordId, fn, { rerender = false, refreshCursor =
   const chord = section.chords.find(entry => entry.id === chordId);
   if (!chord) return;
   fn(chord);
-  commitSong({ rerender, refreshCursor });
+  commitSong({ rerender, refreshCursor, flushNoteBuffer: true });
   if (!rerender) {
     updateChordCard(sectionId, chordId);
     renderArrangementPanel(sectionId);
@@ -1286,7 +1283,7 @@ function transposeSong(steps) {
       if ((song.stringPitchMode || 'linked') !== 'free') chord.stringRoot = chord.root;
     });
   });
-  commitSong({ rerender: true, refreshCursor: true });
+  commitSong({ rerender: true, refreshCursor: true, flushNoteBuffer: true });
 }
 
 function updateBpm(raw) {
@@ -1294,7 +1291,7 @@ function updateBpm(raw) {
   song.bpm = value;
   const element = document.getElementById('bpm-input');
   if (element && parseInt(element.value, 10) !== value) element.value = value;
-  commitSong();
+  commitSong({ flushNoteBuffer: true });
 }
 
 function updateMixerField(field, value) {
@@ -1765,6 +1762,23 @@ function stopAndClearActiveAudioNodes() {
     });
     cleanupAudioNodeEntry(entry, false);
   });
+}
+
+function flushScheduledNotes({ restartPlayback = false } = {}) {
+  if (schedulerTimer !== null) {
+    clearTimeout(schedulerTimer);
+    schedulerTimer = null;
+  }
+  if (songEndTimeout !== null) {
+    clearTimeout(songEndTimeout);
+    songEndTimeout = null;
+  }
+  songEndedPending = false;
+  stopAndClearActiveAudioNodes();
+  if (!(restartPlayback && isBeating)) return;
+  currentStep = 0;
+  nextNoteTime = getAudioCtx().currentTime + 0.05;
+  scheduler();
 }
 
 function getSynthTranspose(synthSettings) {
@@ -2573,15 +2587,7 @@ function startBeat() {
 
 function stopBeat() {
   isBeating = false;
-  if (schedulerTimer !== null) {
-    clearTimeout(schedulerTimer);
-    schedulerTimer = null;
-  }
-  if (songEndTimeout !== null) {
-    clearTimeout(songEndTimeout);
-    songEndTimeout = null;
-  }
-  stopAndClearActiveAudioNodes();
+  flushScheduledNotes();
   debugLog('Playback stopped');
   document.getElementById('beat-start').disabled = false;
   document.getElementById('beat-stop').disabled = true;
