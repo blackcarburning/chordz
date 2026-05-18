@@ -540,6 +540,7 @@ function createChord(root = DEFAULT_CHORD_ROOT, type = 'maj') {
     beats: 4,
     chordRepeat: 1,
     bassRepeat: 1,
+    stringRepeat: 1,
     noteCount: clampInt(chordTypeObj(normalizedType).intervals.length, 3, 1, 16),
     startBeat: 1,
     loopEnabled: false,
@@ -733,6 +734,7 @@ function normalizeChord(rawChord) {
     beats: clampInt(chord.beats, 4, 1, 64),
     chordRepeat: normalizeRepeat(chord.chordRepeat, 1),
     bassRepeat: normalizeRepeat(chord.bassRepeat, 1),
+    stringRepeat: normalizeRepeat(chord.stringRepeat, normalizeRepeat(chord.chordRepeat, 1)),
     noteCount: clampInt(chord.noteCount, defaultNoteCount, 1, 16),
     startBeat: normalizeStartBeat(chord.startBeat, 1),
     loopEnabled: Boolean(loopEnabled),
@@ -921,11 +923,15 @@ function beatOffsetToSeconds(beats) {
 // =====================================================================
 
 function commitSong({ rerender = false, refreshCursor = false, flushNoteBuffer = false } = {}) {
+  if (flushNoteBuffer) {
+    if (refreshCursor && isBeating) initializePlaybackCursor();
+    flushScheduledNotes({ restartPlayback: isBeating });
+  } else if (refreshCursor && isBeating && !rerender) {
+    initializePlaybackCursor();
+  }
   songVersion += 1;
   saveSong();
   applyAudioMixSettings();
-  if (refreshCursor && isBeating && !rerender) initializePlaybackCursor();
-  if (flushNoteBuffer) flushScheduledNotes({ restartPlayback: isBeating });
   if (rerender) {
     render();
     return;
@@ -1155,6 +1161,12 @@ function updateChordRepeat(sectionId, chordId, repeat) {
 function updateBassRepeat(sectionId, chordId, repeat) {
   mutateChord(sectionId, chordId, chord => {
     chord.bassRepeat = normalizeRepeat(repeat, chord.bassRepeat || 1);
+  }, { refreshCursor: true });
+}
+
+function updateStringRepeat(sectionId, chordId, repeat) {
+  mutateChord(sectionId, chordId, chord => {
+    chord.stringRepeat = normalizeRepeat(repeat, chord.stringRepeat ?? chord.chordRepeat ?? 1);
   }, { refreshCursor: true });
 }
 
@@ -2529,7 +2541,7 @@ function scheduleMusicalBeat(time) {
     const chordNoteCount = clampInt(chord.noteCount, chordTypeObj(chord.type).intervals.length, 1, 16);
     playChordNotes(chord.root, chord.type, time, chord.beats || 4, chord.chordRepeat || 1, chordStartBeat, chord.arpMode || 'off', chordNoteCount);
     if (song.bassEnabled) playBassNote(getChordBassRoot(chord), time, chord.beats || 4, chord.bassRepeat || 1, chordStartBeat);
-    if (song.stringEnabled) playStringNotes(getChordStringRoot(chord), chord.type, time, chord.beats || 4, chord.chordRepeat || 1, chordStartBeat, chordNoteCount);
+    if (song.stringEnabled) playStringNotes(getChordStringRoot(chord), chord.type, time, chord.beats || 4, chord.stringRepeat || chord.chordRepeat || 1, chordStartBeat, chordNoteCount);
   }
 
   const sectionBeats = getSectionBeatLength(section);
@@ -3248,6 +3260,7 @@ function updateChordCard(sectionId, chordId) {
   const startBeatElement = document.getElementById('start-beat-' + chordId);
   const chordRepeatElement = document.getElementById('chord-repeat-' + chordId);
   const bassRepeatElement = document.getElementById('bass-repeat-' + chordId);
+  const stringRepeatElement = document.getElementById('string-repeat-' + chordId);
   const noteCountElement = document.getElementById('note-count-' + chordId);
   const loopEnabledElement = document.getElementById('loop-enabled-' + chordId);
   const arpModeElement = document.getElementById('arp-mode-' + chordId);
@@ -3276,6 +3289,7 @@ function updateChordCard(sectionId, chordId) {
   if (startBeatElement) startBeatElement.value = String(normalizeStartBeat(chord.startBeat, 1));
   if (chordRepeatElement) chordRepeatElement.value = String(chord.chordRepeat || 1);
   if (bassRepeatElement) bassRepeatElement.value = String(chord.bassRepeat || 1);
+  if (stringRepeatElement) stringRepeatElement.value = String(chord.stringRepeat || chord.chordRepeat || 1);
   if (noteCountElement) noteCountElement.value = String(clampInt(chord.noteCount, chordTypeObj(chord.type).intervals.length, 1, 16));
   if (loopEnabledElement) loopEnabledElement.checked = Boolean(chord.loopEnabled);
   if (arpModeElement) arpModeElement.value = ARP_MODES.includes(chord.arpMode) ? chord.arpMode : 'off';
@@ -3794,6 +3808,21 @@ function buildChordCard(chord, sectionId) {
   });
   bassRepeatSelect.addEventListener('change', () => updateBassRepeat(sectionId, chord.id, bassRepeatSelect.value));
 
+  const stringRepeatLabel = document.createElement('label');
+  stringRepeatLabel.textContent = 'String x';
+  stringRepeatLabel.setAttribute('for', 'string-repeat-' + chord.id);
+  const stringRepeatSelect = document.createElement('select');
+  stringRepeatSelect.id = 'string-repeat-' + chord.id;
+  stringRepeatSelect.className = 'repeat-select';
+  NOTE_REPEAT_OPTIONS.forEach(value => {
+    const option = document.createElement('option');
+    option.value = String(value);
+    option.textContent = String(value);
+    if (value === (chord.stringRepeat || chord.chordRepeat || 1)) option.selected = true;
+    stringRepeatSelect.appendChild(option);
+  });
+  stringRepeatSelect.addEventListener('change', () => updateStringRepeat(sectionId, chord.id, stringRepeatSelect.value));
+
   const chordRepeatWrap = document.createElement('div');
   chordRepeatWrap.className = 'repeat-field';
   chordRepeatWrap.append(chordRepeatLabel, chordRepeatSelect);
@@ -3802,7 +3831,11 @@ function buildChordCard(chord, sectionId) {
   bassRepeatWrap.className = 'repeat-field';
   bassRepeatWrap.append(bassRepeatLabel, bassRepeatSelect);
 
-  repeatRow.append(chordRepeatWrap, bassRepeatWrap);
+  const stringRepeatWrap = document.createElement('div');
+  stringRepeatWrap.className = 'repeat-field';
+  stringRepeatWrap.append(stringRepeatLabel, stringRepeatSelect);
+
+  repeatRow.append(chordRepeatWrap, bassRepeatWrap, stringRepeatWrap);
 
   const articulationRow = document.createElement('div');
   articulationRow.className = 'repeat-row';
