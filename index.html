@@ -38,6 +38,7 @@
         <select id="playback-mode-select" aria-label="Playback mode">
           <option value="edit">Edit</option>
           <option value="song">Song</option>
+          <option value="looping">Looping</option>
         </select>
       </div>
 
@@ -81,6 +82,10 @@
       <strong>Song mode:</strong> playback follows the arranger order (if entries exist), including arranger repeats, then stops.
       If arranger is empty, Song mode plays sections top-to-bottom. Use <strong>Go to</strong> to jump.
       Crash/roll section options trigger at section start/end.
+    </p>
+    <p class="playback-help" id="playback-help-looping">
+      <strong>Looping mode:</strong> follows the Song timeline, but only chords with <strong>Loop</strong> enabled will loop continuously.
+      Arpeggio settings are per chord and only affect chord notes.
     </p>
     <div class="go-to-row">
       <label for="song-go-to">Go to</label>
@@ -172,7 +177,7 @@
           <dd>Each section has a <strong>Drum pattern</strong> dropdown in its options row. Choose which of the 10 patterns plays for that section. The arranger uses the section's assigned pattern when playing in Song mode.</dd>
 
           <dt>📍 Go to / position</dt>
-          <dd>In Song mode, use the Go to slider to jump to a song location. The position display shows current section, chord, and beat.</dd>
+          <dd>In Song or Looping mode, use the Go to slider to jump to a song location. The position display shows current section, chord, and beat.</dd>
 
           <dt>⏱️ Chord Beats</dt>
           <dd>Each chord defaults to 4 beats (1 bar). Change Beats on each chord card to control progression length.</dd>
@@ -180,8 +185,8 @@
           <dt>🎛️ Chord/Bass sounds</dt>
           <dd>Chord and bass each have compact 2-oscillator synth panels with presets, waveform selectors (Osc 1/Osc 2), per-synth <strong>Transpose</strong>, ADSR, filter, harmonic drive (distortion), simple modulation (rate/depth), and tone shaping controls (Osc2 interval, detune, mix). The bass panel also includes a <strong>Pitch mode</strong> switch: <strong>Linked</strong> (bass follows chord) or <strong>Free</strong> (independent bass pitch).</dd>
 
-          <dt>↻ Chord cycle</dt>
-          <dd>Use the <strong>↻ On/Off</strong> button on each chord card to arpeggiate that chord during playback without changing other chords.</dd>
+          <dt>↻ Chord Loop + Arp</dt>
+          <dd>Each chord card has a <strong>Loop</strong> toggle for Looping mode and an <strong>Arp</strong> selector (Off/Up/Down/Up and down) that changes chord-note articulation only.</dd>
 
           <dt>🐞 Debug panel</dt>
           <dd>Use the header <strong>Debug</strong> button to open a copyable runtime snapshot for transport/audio diagnostics.</dd>

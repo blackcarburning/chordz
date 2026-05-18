@@ -55,10 +55,11 @@ const SCALES = [
 ];
 
 const SECTION_TYPES = ['Verse', 'Chorus', 'Bridge', 'Middle 8', 'Change', 'Outro', 'Custom'];
-const PLAYBACK_MODES = ['edit', 'song'];
+const PLAYBACK_MODES = ['edit', 'song', 'looping'];
 const BASS_PITCH_MODES = ['linked', 'free'];
 const NOTE_REPEAT_OPTIONS = [1, 2, 4];
 const START_BEAT_OPTIONS = [1, 2, 3, 4];
+const ARP_MODES = ['off', 'up', 'down', 'upDown'];
 const RECENT_SONG_LIMIT = 8;
 const DEFAULT_CHORD_ROOT = -12;
 
@@ -451,7 +452,8 @@ function createChord(root = DEFAULT_CHORD_ROOT, type = 'maj') {
     chordRepeat: 1,
     bassRepeat: 1,
     startBeat: 1,
-    cycle: false,
+    loopEnabled: false,
+    arpMode: 'off',
   };
 }
 
@@ -556,6 +558,8 @@ function getActivePitchTarget() {
 
 function normalizeChord(rawChord) {
   const chord = rawChord || {};
+  const loopEnabled = chord.loopEnabled !== undefined ? chord.loopEnabled : chord.cycle;
+  const arpMode = ARP_MODES.includes(chord.arpMode) ? chord.arpMode : 'off';
   return {
     id: chord.id || makeId(),
     root: normalizeSemitone(chord.root, 0),
@@ -565,7 +569,8 @@ function normalizeChord(rawChord) {
     chordRepeat: normalizeRepeat(chord.chordRepeat, 1),
     bassRepeat: normalizeRepeat(chord.bassRepeat, 1),
     startBeat: normalizeStartBeat(chord.startBeat, 1),
-    cycle: Boolean(chord.cycle),
+    loopEnabled: Boolean(loopEnabled),
+    arpMode,
   };
 }
 
@@ -959,9 +964,15 @@ function updateChordStartBeat(sectionId, chordId, startBeat) {
   }, { refreshCursor: true });
 }
 
-function updateChordCycle(sectionId, chordId, enabled) {
+function updateChordLoopEnabled(sectionId, chordId, enabled) {
   mutateChord(sectionId, chordId, chord => {
-    chord.cycle = Boolean(enabled);
+    chord.loopEnabled = Boolean(enabled);
+  });
+}
+
+function updateChordArpMode(sectionId, chordId, mode) {
+  mutateChord(sectionId, chordId, chord => {
+    chord.arpMode = ARP_MODES.includes(mode) ? mode : 'off';
   });
 }
 
@@ -1879,7 +1890,19 @@ function playSynthVoice(freq, time, duration, synthSettings, kind = 'chord') {
   registerAudioNodeEntry(sources, nodes, 'voice');
 }
 
-function playChordNotes(rootSemitone, typeName, when, beats = 4, repeats = 1, startBeat = 1, cycle = false) {
+function buildArpStepPattern(noteCount, mode = 'off') {
+  if (noteCount <= 0 || mode === 'off') return [];
+  if (mode === 'down') return Array.from({ length: noteCount }, (_, index) => noteCount - 1 - index);
+  if (mode === 'upDown') {
+    const up = Array.from({ length: noteCount }, (_, index) => index);
+    if (noteCount <= 2) return up;
+    for (let index = noteCount - 2; index >= 1; index--) up.push(index);
+    return up;
+  }
+  return Array.from({ length: noteCount }, (_, index) => index);
+}
+
+function playChordNotes(rootSemitone, typeName, when, beats = 4, repeats = 1, startBeat = 1, arpMode = 'off') {
   const chordType = chordTypeObj(typeName);
   const rootMidi = 60 + rootSemitone + getSynthTranspose(song.chordSynth);
   const totalBeats = clampInt(beats, 4, 1, 64);
@@ -1887,12 +1910,12 @@ function playChordNotes(rootSemitone, typeName, when, beats = 4, repeats = 1, st
   const effectiveStartBeat = Math.min(totalBeats, normalizeStartBeat(startBeat, 1));
   const startOffsetBeats = effectiveStartBeat - 1;
   const activeBeats = Math.max(0.25, totalBeats - startOffsetBeats);
-  if (cycle && chordType.intervals.length) {
+  if (arpMode !== 'off' && chordType.intervals.length) {
     const intervals = chordType.intervals;
-    const noteCount = intervals.length;
-    // Use an 8th-note step (half a beat) for clearly audible, musical cycling.
-    // beatOffsetToSeconds correctly handles sub-beat values (unlike beatsToSeconds
-    // which clamps to a minimum of 1 beat, causing heavy note overlap).
+    const arpStepPattern = buildArpStepPattern(intervals.length, arpMode);
+    const noteCount = arpStepPattern.length;
+    if (!noteCount) return;
+    // Arpeggio articulation is independent from chord looping mode.
     const stepBeats = 0.5;
     const stepSeconds = beatOffsetToSeconds(stepBeats);
     const noteDuration = Math.max(0.05, stepSeconds * 0.88);
@@ -1905,7 +1928,7 @@ function playChordNotes(rootSemitone, typeName, when, beats = 4, repeats = 1, st
       if (remaining <= 0.01) break;
       const actualDuration = Math.min(noteDuration, Math.max(0.04, remaining * 0.95));
       playSynthVoice(
-        frequencyFromMidi(rootMidi + intervals[step % noteCount]),
+        frequencyFromMidi(rootMidi + intervals[arpStepPattern[step % noteCount]]),
         hitTime,
         actualDuration,
         song.chordSynth,
@@ -2004,6 +2027,10 @@ function buildSongBeatMap() {
   return map;
 }
 
+function usesSongTimelineMode(mode = song.playbackMode || 'edit') {
+  return mode === 'song' || mode === 'looping';
+}
+
 function updateSongGoToControl() {
   const slider = document.getElementById('song-go-to');
   if (!slider) return;
@@ -2028,7 +2055,7 @@ function updatePlaybackPositionUI(sectionIndex, chordIndex, beatInChord, songBea
   if (positionElement) positionElement.textContent = formatPlaybackPosition(sectionIndex, chordIndex, beatInChord);
 
   const slider = document.getElementById('song-go-to');
-  if (slider && song.playbackMode === 'song') slider.value = String(songBeatIndex);
+  if (slider && usesSongTimelineMode(song.playbackMode)) slider.value = String(songBeatIndex);
 
   const label = document.getElementById('song-go-to-label');
   if (label) {
@@ -2061,7 +2088,7 @@ function setSongPositionFromSlider(rawValue) {
 
 function initializePlaybackCursor() {
   const mode = song.playbackMode || 'edit';
-  if (mode === 'song') {
+  if (usesSongTimelineMode(mode)) {
     setSongPositionFromSlider(document.getElementById('song-go-to')?.value || 0);
     return;
   }
@@ -2081,9 +2108,28 @@ function initializePlaybackCursor() {
 
 function advancePlaybackCursor() {
   const mode = song.playbackMode || 'edit';
-  if (mode === 'song') {
+  if (usesSongTimelineMode(mode)) {
     const map = buildSongBeatMap();
     if (!map.length) return;
+    const currentPoint = map[playbackCursor.songBeatIndex];
+    if (mode === 'looping' && currentPoint) {
+      const section = song.sections[currentPoint.sectionIndex];
+      const chord = section?.chords?.[currentPoint.chordIndex];
+      if (chord?.loopEnabled && currentPoint.beatInChord + 1 >= (chord.beats || 4)) {
+        const loopStartIndex = Math.max(0, playbackCursor.songBeatIndex - currentPoint.beatInChord);
+        const loopPoint = map[loopStartIndex] || currentPoint;
+        playbackCursor.sequenceIndex = loopPoint.sequenceIndex;
+        playbackCursor.sectionIndex = loopPoint.sectionIndex;
+        playbackCursor.chordIndex = loopPoint.chordIndex;
+        playbackCursor.beatInChord = loopPoint.beatInChord;
+        playbackCursor.beatInSection = loopPoint.beatInSection;
+        playbackCursor.arrangerEntryId = loopPoint.arrangerEntryId;
+        playbackCursor.arrangerEntryIndex = loopPoint.arrangerEntryIndex;
+        playbackCursor.arrangerRepeatIndex = loopPoint.arrangerRepeatIndex;
+        playbackCursor.songBeatIndex = loopStartIndex;
+        return;
+      }
+    }
     const nextIndex = playbackCursor.songBeatIndex + 1;
     if (nextIndex >= map.length) {
       songEndedPending = true;
@@ -2135,7 +2181,7 @@ function advancePlaybackCursor() {
 
 function scheduleMusicalBeat(time) {
   if (!song.sections.length) return;
-  if ((song.playbackMode || 'edit') === 'song' && !buildSongBeatMap().length) {
+  if (usesSongTimelineMode(song.playbackMode || 'edit') && !buildSongBeatMap().length) {
     songEndedPending = true;
     return;
   }
@@ -2144,7 +2190,7 @@ function scheduleMusicalBeat(time) {
 
   if (!section.chords.length) {
     updatePlaybackPositionUI(playbackCursor.sectionIndex, 0, 0, playbackCursor.songBeatIndex);
-    if ((song.playbackMode || 'edit') === 'song') advancePlaybackCursor();
+    if (usesSongTimelineMode(song.playbackMode || 'edit')) advancePlaybackCursor();
     return;
   }
 
@@ -2154,7 +2200,7 @@ function scheduleMusicalBeat(time) {
   if (playbackCursor.beatInSection === 0 && section.crashOnStart) playCrash(time);
   if (playbackCursor.beatInChord === 0) {
     const chordStartBeat = getChordPlaybackStartBeat(chord);
-    playChordNotes(chord.root, chord.type, time, chord.beats || 4, chord.chordRepeat || 1, chordStartBeat, chord.cycle === true);
+    playChordNotes(chord.root, chord.type, time, chord.beats || 4, chord.chordRepeat || 1, chordStartBeat, chord.arpMode || 'off');
     if (song.bassEnabled) playBassNote(getChordBassRoot(chord), time, chord.beats || 4, chord.bassRepeat || 1, chordStartBeat);
   }
 
@@ -2788,13 +2834,17 @@ function buildSynthSlider(kind, synth, field) {
 
 function updatePlaybackModeUI() {
   const isEdit = (song.playbackMode || 'edit') === 'edit';
+  const isSong = (song.playbackMode || 'edit') === 'song';
+  const isLooping = (song.playbackMode || 'edit') === 'looping';
   document.querySelectorAll('.section-play-select').forEach(element => {
     element.style.display = isEdit ? 'inline-flex' : 'none';
   });
   const editHelp = document.getElementById('playback-help-edit');
   const songHelp = document.getElementById('playback-help-song');
+  const loopingHelp = document.getElementById('playback-help-looping');
   if (editHelp) editHelp.style.display = isEdit ? 'block' : 'none';
-  if (songHelp) songHelp.style.display = isEdit ? 'none' : 'block';
+  if (songHelp) songHelp.style.display = isSong ? 'block' : 'none';
+  if (loopingHelp) loopingHelp.style.display = isLooping ? 'block' : 'none';
   const slider = document.getElementById('song-go-to');
   if (slider) slider.disabled = isEdit;
 }
@@ -2827,7 +2877,8 @@ function updateChordCard(sectionId, chordId) {
   const startBeatElement = document.getElementById('start-beat-' + chordId);
   const chordRepeatElement = document.getElementById('chord-repeat-' + chordId);
   const bassRepeatElement = document.getElementById('bass-repeat-' + chordId);
-  const cycleButtonElement = document.getElementById('cycle-chord-' + chordId);
+  const loopEnabledElement = document.getElementById('loop-enabled-' + chordId);
+  const arpModeElement = document.getElementById('arp-mode-' + chordId);
   if (rootElement) rootElement.textContent = noteName(chord.root);
   if (offsetElement) {
     const offset = formatPitchOffset(chord.root);
@@ -2847,13 +2898,8 @@ function updateChordCard(sectionId, chordId) {
   if (startBeatElement) startBeatElement.value = String(normalizeStartBeat(chord.startBeat, 1));
   if (chordRepeatElement) chordRepeatElement.value = String(chord.chordRepeat || 1);
   if (bassRepeatElement) bassRepeatElement.value = String(chord.bassRepeat || 1);
-  if (cycleButtonElement) {
-    const enabled = Boolean(chord.cycle);
-    cycleButtonElement.textContent = enabled ? '↻ On' : '↻ Off';
-    cycleButtonElement.setAttribute('aria-pressed', String(enabled));
-    cycleButtonElement.title = enabled ? 'Disable chord cycle' : 'Enable chord cycle';
-    cycleButtonElement.classList.toggle('active', enabled);
-  }
+  if (loopEnabledElement) loopEnabledElement.checked = Boolean(chord.loopEnabled);
+  if (arpModeElement) arpModeElement.value = ARP_MODES.includes(chord.arpMode) ? chord.arpMode : 'off';
 }
 
 function renderArrangementPanel(sectionId) {
@@ -3311,6 +3357,44 @@ function buildChordCard(chord, sectionId) {
 
   repeatRow.append(chordRepeatWrap, bassRepeatWrap);
 
+  const articulationRow = document.createElement('div');
+  articulationRow.className = 'repeat-row';
+
+  const loopWrap = document.createElement('label');
+  loopWrap.className = 'checkbox-inline chord-loop-toggle';
+  const loopEnabledInput = document.createElement('input');
+  loopEnabledInput.type = 'checkbox';
+  loopEnabledInput.id = 'loop-enabled-' + chord.id;
+  loopEnabledInput.checked = Boolean(chord.loopEnabled);
+  loopEnabledInput.setAttribute('aria-label', 'Loop this chord in looping mode');
+  loopEnabledInput.addEventListener('change', () => updateChordLoopEnabled(sectionId, chord.id, loopEnabledInput.checked));
+  loopWrap.append(loopEnabledInput, document.createTextNode('Loop'));
+
+  const arpModeWrap = document.createElement('div');
+  arpModeWrap.className = 'repeat-field';
+  const arpModeLabel = document.createElement('label');
+  arpModeLabel.textContent = 'Arp';
+  arpModeLabel.setAttribute('for', 'arp-mode-' + chord.id);
+  const arpModeSelect = document.createElement('select');
+  arpModeSelect.id = 'arp-mode-' + chord.id;
+  arpModeSelect.className = 'repeat-select';
+  [
+    { value: 'off', text: 'Off' },
+    { value: 'up', text: 'Up' },
+    { value: 'down', text: 'Down' },
+    { value: 'upDown', text: 'Up and down' },
+  ].forEach(optionConfig => {
+    const option = document.createElement('option');
+    option.value = optionConfig.value;
+    option.textContent = optionConfig.text;
+    if ((chord.arpMode || 'off') === optionConfig.value) option.selected = true;
+    arpModeSelect.appendChild(option);
+  });
+  arpModeSelect.addEventListener('change', () => updateChordArpMode(sectionId, chord.id, arpModeSelect.value));
+  arpModeWrap.append(arpModeLabel, arpModeSelect);
+
+  articulationRow.append(loopWrap, arpModeWrap);
+
   const actionBar = document.createElement('div');
   actionBar.className = 'chord-action-bar';
 
@@ -3328,18 +3412,8 @@ function buildChordCard(chord, sectionId) {
   removeButton.setAttribute('aria-label', 'Remove chord');
   removeButton.addEventListener('click', () => removeChord(sectionId, chord.id));
 
-  const cycleButton = document.createElement('button');
-  cycleButton.id = 'cycle-chord-' + chord.id;
-  cycleButton.className = 'cycle-chord-btn';
-  cycleButton.textContent = chord.cycle ? '↻ On' : '↻ Off';
-  cycleButton.title = chord.cycle ? 'Disable chord cycle' : 'Enable chord cycle';
-  cycleButton.setAttribute('aria-label', 'Toggle chord cycle');
-  cycleButton.setAttribute('aria-pressed', String(Boolean(chord.cycle)));
-  if (chord.cycle) cycleButton.classList.add('active');
-  cycleButton.addEventListener('click', () => updateChordCycle(sectionId, chord.id, !chord.cycle));
-
-  actionBar.append(auditionButton, cycleButton, removeButton);
-  card.append(rootElement, offsetElement, bassRootElement, bassOffsetElement, qualityElement, divider1, noteRow, bassRow, typeRow, transposeRow, divider2, beatsRow, startBeatRow, repeatRow, actionBar);
+  actionBar.append(auditionButton, removeButton);
+  card.append(rootElement, offsetElement, bassRootElement, bassOffsetElement, qualityElement, divider1, noteRow, bassRow, typeRow, transposeRow, divider2, beatsRow, startBeatRow, repeatRow, articulationRow, actionBar);
   return card;
 }
 
@@ -3543,7 +3617,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('playback-mode-select').addEventListener('change', event => setPlaybackMode(event.target.value));
   document.getElementById('song-go-to').addEventListener('input', event => {
     setSongPositionFromSlider(event.target.value);
-    if (isBeating && song.playbackMode === 'song') initializePlaybackCursor();
+    if (isBeating && usesSongTimelineMode(song.playbackMode)) initializePlaybackCursor();
   });
 
   document.getElementById('beat-start').addEventListener('click', () => {
