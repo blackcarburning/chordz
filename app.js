@@ -1264,6 +1264,9 @@ function updateSynthField(kind, fieldKey, value) {
   if (!synth || !field) return;
   const clamped = clampNumber(value, synth[fieldKey], field.min, field.max);
   synth[fieldKey] = field.step >= 1 ? Math.round(clamped) : clamped;
+  if (fieldKey === 'cutoff' || fieldKey === 'resonance') {
+    applySynthFilterSettingsToActiveVoices(kind);
+  }
   markSynthAsCustom(kind);
   handleSynthParameterChange();
 }
@@ -1271,7 +1274,10 @@ function updateSynthField(kind, fieldKey, value) {
 function updateSynthSelectField(kind, fieldKey, value) {
   const synth = getSynthByKind(kind);
   if (!synth) return;
-  if (fieldKey === 'filterPoles') synth.filterPoles = normalizeFilterPoles(value, synth.filterPoles);
+  if (fieldKey === 'filterPoles') {
+    synth.filterPoles = normalizeFilterPoles(value, synth.filterPoles);
+    applySynthFilterSettingsToActiveVoices(kind);
+  }
   else if (fieldKey === 'delaySubdivisionBeats') synth.delaySubdivisionBeats = normalizeDelaySubdivision(Number(value), synth.delaySubdivisionBeats);
   else if (fieldKey === 'delayFeel') synth.delayFeel = normalizeDelayFeel(value, synth.delayFeel);
   else return;
@@ -2782,10 +2788,17 @@ function cleanupAudioNodeEntry(entry, voiceEnded = false) {
   activeAudioNodes.delete(entry);
 }
 
-function registerAudioNodeEntry(sources, nodes, kind = 'generic') {
+function registerAudioNodeEntry(sources, nodes, kind = 'generic', voiceKind = null, filterNodes = null) {
   const validSources = (Array.isArray(sources) ? sources : []).filter(Boolean);
   const validNodes = (Array.isArray(nodes) ? nodes : []).filter(Boolean);
-  const entry = { sources: validSources, nodes: validNodes, kind, cleaned: false };
+  const entry = {
+    sources: validSources,
+    nodes: validNodes,
+    kind,
+    voiceKind: kind === 'voice' ? (voiceKind || 'chord') : null,
+    filterNodes: kind === 'voice' ? (Array.isArray(filterNodes) ? filterNodes.filter(Boolean) : null) : null,
+    cleaned: false,
+  };
   if (kind === 'voice') {
     activeVoiceCount += 1;
     debugState.counters.voicesCreated += 1;
@@ -2833,6 +2846,23 @@ function flushScheduledNotes({ restartPlayback = false, snapToChordStart = false
 
 function getSynthTranspose(synthSettings) {
   return clampInt(synthSettings?.transpose, 0, -24, 24);
+}
+
+function applySynthFilterSettingsToActiveVoices(kind) {
+  if (!audioCtx || !activeAudioNodes.size) return;
+  const synth = getSynthByKind(kind);
+  if (!synth) return;
+  const cutoff = clampNumber(synth.cutoff, 1200, 120, 6000);
+  const resonance = clampNumber(synth.resonance, 1, 0.2, 12);
+  activeAudioNodes.forEach(entry => {
+    if (entry.kind !== 'voice' || entry.voiceKind !== kind || !entry.filterNodes?.length) return;
+    const lastFilterIndex = entry.filterNodes.length - 1;
+    entry.filterNodes.forEach((filter, index) => {
+      const stageQ = index === lastFilterIndex ? resonance : Math.max(0.2, resonance * 0.5);
+      setAudioParamSmooth(filter.frequency, cutoff, audioCtx, 0.02);
+      setAudioParamSmooth(filter.Q, stageQ, audioCtx, 0.02);
+    });
+  });
 }
 
 function createNoiseBuffer(duration) {
@@ -3206,7 +3236,7 @@ function playSynthVoice(freq, time, duration, synthSettings, kind = 'chord') {
     sources.push(lfo);
     nodes.push(lfo, ...lfoGains);
   }
-  registerAudioNodeEntry(sources, nodes, 'voice');
+  registerAudioNodeEntry(sources, nodes, 'voice', kind, filterChain.filters);
 }
 
 function buildArpStepPattern(noteCount, mode = 'off') {
