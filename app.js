@@ -294,6 +294,25 @@ const STRING_SOUND_PRESETS = [
   { id: 'custom', label: 'Custom' },
 ];
 
+const DELAY_SUBDIVISION_OPTIONS = [
+  { value: 0.25, label: '1/16' },
+  { value: 0.5, label: '1/8' },
+  { value: 1, label: '1/4' },
+  { value: 2, label: '1/2' },
+];
+
+const DELAY_FEEL_OPTIONS = [
+  { value: 'straight', label: 'Straight' },
+  { value: 'dotted', label: 'Dotted' },
+  { value: 'triplet', label: 'Triplet' },
+];
+
+const FILTER_POLE_OPTIONS = [
+  { value: 1, label: '1-pole / 6 dB' },
+  { value: 2, label: '2-pole / 12 dB' },
+  { value: 4, label: '4-pole / 24 dB' },
+];
+
 const LEGACY_CHORD_PRESET_MAP = {
   piano: 'softKeys',
   pad: 'warmPad',
@@ -321,6 +340,9 @@ const SYNTH_UI_FIELDS = [
   { key: 'cutoff', label: 'Cut', min: 120, max: 6000, step: 10, format: value => Math.round(value) + ' Hz' },
   { key: 'resonance', label: 'Q', min: 0.2, max: 12, step: 0.1, format: value => value.toFixed(1) },
   { key: 'distortion', label: 'Drive', min: 0, max: 1, step: 0.01, format: value => Math.round(value * 100) + '%' },
+  { key: 'delayMix', label: 'Delay Mix', min: 0, max: 1, step: 0.01, format: value => Math.round(value * 100) + '%' },
+  { key: 'delayFeedback', label: 'Delay Amt', min: 0, max: 0.88, step: 0.01, format: value => Math.round(value * 100) + '%' },
+  { key: 'delayFilterCutoff', label: 'Delay Cut', min: 300, max: 8000, step: 10, format: value => Math.round(value) + ' Hz' },
   { key: 'modRate', label: 'Mod Hz', min: 0, max: 12, step: 0.1, format: value => value.toFixed(1) + ' Hz' },
   { key: 'modDepth', label: 'Mod Depth', min: 0, max: 80, step: 1, format: value => Math.round(value) + '¢' },
 ];
@@ -420,12 +442,36 @@ function createSynthSettings(kind, presetId) {
     distortion: 0,
     modRate: 0,
     modDepth: 0,
+    filterPoles: 1,
+    delaySubdivisionBeats: 0.5,
+    delayFeel: 'straight',
+    delayMix: 0,
+    delayFeedback: 0.25,
+    delayFilterCutoff: 2800,
   };
   if (kind === 'string') {
     settings.osc3Type = preset.osc3Type || preset.osc1Type;
     settings.osc4Type = preset.osc4Type || preset.osc2Type;
   }
   return settings;
+}
+
+function normalizeFilterPoles(value, fallback = 1) {
+  const parsed = clampInt(value, fallback, 1, 4);
+  if (parsed >= 4) return 4;
+  if (parsed >= 2) return 2;
+  return 1;
+}
+
+function normalizeDelaySubdivision(value, fallback = 0.5) {
+  const allowed = DELAY_SUBDIVISION_OPTIONS.map(option => option.value);
+  const parsed = clampNumber(value, fallback, 0.25, 2);
+  return allowed.includes(parsed) ? parsed : fallback;
+}
+
+function normalizeDelayFeel(value, fallback = 'straight') {
+  const valid = DELAY_FEEL_OPTIONS.map(option => option.value);
+  return valid.includes(value) ? value : fallback;
 }
 
 function normalizeSynthSettings(kind, rawSynth, legacyPreset) {
@@ -453,6 +499,12 @@ function normalizeSynthSettings(kind, rawSynth, legacyPreset) {
     distortion: clampNumber(synth.distortion, base.distortion, 0, 1),
     modRate: clampNumber(synth.modRate, base.modRate, 0, 12),
     modDepth: clampNumber(synth.modDepth, base.modDepth, 0, 80),
+    filterPoles: normalizeFilterPoles(synth.filterPoles, base.filterPoles),
+    delaySubdivisionBeats: normalizeDelaySubdivision(synth.delaySubdivisionBeats, base.delaySubdivisionBeats),
+    delayFeel: normalizeDelayFeel(synth.delayFeel, base.delayFeel),
+    delayMix: clampNumber(synth.delayMix, base.delayMix, 0, 1),
+    delayFeedback: clampNumber(synth.delayFeedback, base.delayFeedback, 0, 0.88),
+    delayFilterCutoff: clampNumber(synth.delayFilterCutoff, base.delayFilterCutoff, 300, 8000),
   };
   if (kind === 'string') {
     normalized.osc3Type = OSC_TYPES.includes(synth.osc3Type) ? synth.osc3Type : base.osc3Type;
@@ -1189,32 +1241,52 @@ function setSynthPanelExpanded(kind, expanded) {
   renderSynthRack();
 }
 
-function updateSynthField(kind, fieldKey, value) {
-  const synth = kind === 'bass' ? song.bassSynth : kind === 'string' ? song.stringSynth : song.chordSynth;
-  const field = SYNTH_UI_FIELDS.find(entry => entry.key === fieldKey);
-  if (!synth || !field) return;
-  const clamped = clampNumber(value, synth[fieldKey], field.min, field.max);
-  synth[fieldKey] = field.step >= 1 ? Math.round(clamped) : clamped;
+function getSynthByKind(kind) {
+  if (kind === 'bass') return song.bassSynth;
+  if (kind === 'string') return song.stringSynth;
+  return song.chordSynth;
+}
+
+function markSynthAsCustom(kind) {
+  const synth = getSynthByKind(kind);
+  if (!synth) return;
   synth.preset = 'custom';
   if (kind === 'bass') song.bassSound = 'custom';
   else if (kind === 'string') song.stringSound = 'custom';
   else song.chordSound = 'custom';
-  handleSynthParameterChange();
   const presetSelect = document.getElementById(`${kind}-preset-select`);
   if (presetSelect) presetSelect.value = 'custom';
+}
+
+function updateSynthField(kind, fieldKey, value) {
+  const synth = getSynthByKind(kind);
+  const field = SYNTH_UI_FIELDS.find(entry => entry.key === fieldKey);
+  if (!synth || !field) return;
+  const clamped = clampNumber(value, synth[fieldKey], field.min, field.max);
+  synth[fieldKey] = field.step >= 1 ? Math.round(clamped) : clamped;
+  markSynthAsCustom(kind);
+  handleSynthParameterChange();
+}
+
+function updateSynthSelectField(kind, fieldKey, value) {
+  const synth = getSynthByKind(kind);
+  if (!synth) return;
+  if (fieldKey === 'filterPoles') synth.filterPoles = normalizeFilterPoles(value, synth.filterPoles);
+  else if (fieldKey === 'delaySubdivisionBeats') synth.delaySubdivisionBeats = normalizeDelaySubdivision(Number(value), synth.delaySubdivisionBeats);
+  else if (fieldKey === 'delayFeel') synth.delayFeel = normalizeDelayFeel(value, synth.delayFeel);
+  else return;
+  markSynthAsCustom(kind);
+  handleSynthParameterChange();
 }
 
 function updateSynthWaveform(kind, fieldKey, value) {
   if (!OSC_TYPES.includes(value)) return;
   if (!['osc1Type', 'osc2Type', 'osc3Type', 'osc4Type'].includes(fieldKey)) return;
-  const synth = kind === 'bass' ? song.bassSynth : kind === 'string' ? song.stringSynth : song.chordSynth;
+  const synth = getSynthByKind(kind);
   if ((fieldKey === 'osc3Type' || fieldKey === 'osc4Type') && kind !== 'string') return;
   if (!synth) return;
   synth[fieldKey] = value;
-  synth.preset = 'custom';
-  if (kind === 'bass') song.bassSound = 'custom';
-  else if (kind === 'string') song.stringSound = 'custom';
-  else song.chordSound = 'custom';
+  markSynthAsCustom(kind);
   handleSynthParameterChange();
   renderSynthRack();
 }
@@ -1972,16 +2044,31 @@ function createOfflineRouting(ctx) {
     const input = ctx.createGain();
     const dry = ctx.createGain();
     const wet = ctx.createGain();
+    const preDelay = ctx.createGain();
+    const delayDry = ctx.createGain();
+    const delayWet = ctx.createGain();
+    const delayFeedback = ctx.createGain();
+    const delay = ctx.createDelay(5);
+    const delayFilter = ctx.createBiquadFilter();
     const output = ctx.createGain();
     const convolver = ctx.createConvolver();
     convolver.buffer = createOfflineImpulseResponse(ctx);
+    delayFilter.type = 'lowpass';
     input.connect(dry);
     input.connect(convolver);
     convolver.connect(wet);
-    dry.connect(output);
-    wet.connect(output);
+    dry.connect(preDelay);
+    wet.connect(preDelay);
+    preDelay.connect(delayDry);
+    preDelay.connect(delay);
+    delay.connect(delayFilter);
+    delayFilter.connect(delayWet);
+    delayFilter.connect(delayFeedback);
+    delayFeedback.connect(delay);
+    delayDry.connect(output);
+    delayWet.connect(output);
     output.connect(master);
-    return { input, dry, wet, output, convolver };
+    return { input, dry, wet, preDelay, delayDry, delayWet, delayFeedback, delay, delayFilter, output, convolver };
   };
   const drumsGain = ctx.createGain();
   drumsGain.connect(master);
@@ -1998,17 +2085,26 @@ function applyOfflineMixSettings(routing) {
   const mixer = song.mixer || {};
   const reverb = song.reverb || {};
   routing.master.gain.value = clampNumber(mixer.masterVolume, 0.95, 0, 1);
-  const setBus = (kind, volume, wet) => {
+  const setBus = (kind, volume, wet, synthSettings) => {
     const bus = routing[kind];
     if (!bus) return;
     const wetMix = clampNumber(wet, 0.2, 0, 1);
+    const delayMix = clampNumber(synthSettings?.delayMix, 0, 0, 1);
+    const delayFeedback = clampNumber(synthSettings?.delayFeedback, 0.25, 0, 0.88);
+    const delayFilterCutoff = clampNumber(synthSettings?.delayFilterCutoff, 2800, 300, 8000);
+    const delaySeconds = getDelayTimeSeconds(synthSettings);
     bus.output.gain.value = clampNumber(volume, 0.9, 0, 1);
     bus.wet.gain.value = wetMix;
     bus.dry.gain.value = 1 - wetMix;
+    bus.delayDry.gain.value = 1 - delayMix;
+    bus.delayWet.gain.value = delayMix;
+    bus.delayFeedback.gain.value = delayFeedback;
+    bus.delay.delayTime.value = delaySeconds;
+    bus.delayFilter.frequency.value = delayFilterCutoff;
   };
-  setBus('chord', mixer.chordVolume, reverb.chordWet);
-  setBus('bass', mixer.bassVolume, reverb.bassWet);
-  setBus('string', mixer.stringVolume, reverb.stringWet);
+  setBus('chord', mixer.chordVolume, reverb.chordWet, song.chordSynth);
+  setBus('bass', mixer.bassVolume, reverb.bassWet, song.bassSynth);
+  setBus('string', mixer.stringVolume, reverb.stringWet, song.stringSynth);
   routing.drums.output.gain.value = clampNumber(mixer.drumsVolume, 0.9, 0, 1);
 }
 
@@ -2025,20 +2121,17 @@ function createNoiseBufferForContext(ctx, cache, duration) {
 
 function renderSynthVoiceOffline(ctx, routing, freq, time, duration, synthSettings, kind = 'chord') {
   const voiceGain = ctx.createGain();
-  const filter = ctx.createBiquadFilter();
-  filter.type = 'lowpass';
-  filter.frequency.setValueAtTime(synthSettings.cutoff, time);
-  filter.Q.setValueAtTime(synthSettings.resonance, time);
+  const filterChain = createMultiPoleFilterChain(ctx, time, synthSettings);
   const driveAmount = clampNumber(synthSettings.distortion, 0, 0, 1);
   let shaper = null;
   if (driveAmount > 0.001) {
     shaper = ctx.createWaveShaper();
     shaper.curve = getDistortionCurve(driveAmount);
     shaper.oversample = '2x';
-    filter.connect(shaper);
+    filterChain.output.connect(shaper);
     shaper.connect(voiceGain);
   } else {
-    filter.connect(voiceGain);
+    filterChain.output.connect(voiceGain);
   }
   voiceGain.connect(routing[kind]?.input || ctx.destination);
 
@@ -2064,7 +2157,7 @@ function renderSynthVoiceOffline(ctx, routing, freq, time, duration, synthSettin
     oscillator.frequency.setValueAtTime(oscillatorFreq, time);
     mixGain.gain.value = config.gain;
     oscillator.connect(mixGain);
-    mixGain.connect(filter);
+    mixGain.connect(filterChain.input);
     oscillators.push(oscillator);
     oscillatorFreqs.push(oscillatorFreq);
   });
@@ -2550,6 +2643,34 @@ function createImpulseResponse(seconds = 1.8, decay = 2.2) {
   return impulse;
 }
 
+function getDelayFeelMultiplier(feel) {
+  if (feel === 'dotted') return 1.5;
+  if (feel === 'triplet') return 2 / 3;
+  return 1;
+}
+
+function getDelayTimeSeconds(synthSettings) {
+  const bpm = clampInt(song?.bpm, 100, 40, 300);
+  const subdivision = normalizeDelaySubdivision(synthSettings?.delaySubdivisionBeats, 0.5);
+  const feel = normalizeDelayFeel(synthSettings?.delayFeel, 'straight');
+  return (60 / bpm) * subdivision * getDelayFeelMultiplier(feel);
+}
+
+function setAudioParamSmooth(param, value, ctx = audioCtx, ramp = 0.015) {
+  if (!param) return;
+  const target = Number(value);
+  if (!Number.isFinite(target)) return;
+  if (!ctx || !Number.isFinite(ctx.currentTime)) {
+    param.value = target;
+    return;
+  }
+  const now = ctx.currentTime;
+  const next = now + Math.max(0.001, ramp);
+  param.cancelScheduledValues(now);
+  param.setValueAtTime(param.value, now);
+  param.linearRampToValueAtTime(target, next);
+}
+
 function setupAudioRouting() {
   if (!audioCtx || audioRouting) return;
   const ctx = audioCtx;
@@ -2560,16 +2681,31 @@ function setupAudioRouting() {
     const input = ctx.createGain();
     const dry = ctx.createGain();
     const wet = ctx.createGain();
+    const preDelay = ctx.createGain();
+    const delayDry = ctx.createGain();
+    const delayWet = ctx.createGain();
+    const delayFeedback = ctx.createGain();
+    const delay = ctx.createDelay(5);
+    const delayFilter = ctx.createBiquadFilter();
     const output = ctx.createGain();
     const convolver = ctx.createConvolver();
     convolver.buffer = createImpulseResponse();
+    delayFilter.type = 'lowpass';
     input.connect(dry);
     input.connect(convolver);
     convolver.connect(wet);
-    dry.connect(output);
-    wet.connect(output);
+    dry.connect(preDelay);
+    wet.connect(preDelay);
+    preDelay.connect(delayDry);
+    preDelay.connect(delay);
+    delay.connect(delayFilter);
+    delayFilter.connect(delayWet);
+    delayFilter.connect(delayFeedback);
+    delayFeedback.connect(delay);
+    delayDry.connect(output);
+    delayWet.connect(output);
     output.connect(master);
-    return { input, dry, wet, output, convolver };
+    return { input, dry, wet, preDelay, delayDry, delayWet, delayFeedback, delay, delayFilter, output, convolver };
   };
 
   const drumsGain = ctx.createGain();
@@ -2591,21 +2727,30 @@ function applyAudioMixSettings() {
   const reverb = song.reverb || {};
   const masterVolume = clampNumber(mixer.masterVolume, 0.95, 0, 1);
 
-  audioRouting.master.gain.value = masterVolume;
-  const setBus = (kind, volume, wet) => {
+  setAudioParamSmooth(audioRouting.master.gain, masterVolume);
+  const setBus = (kind, volume, wet, synthSettings) => {
     const bus = audioRouting[kind];
     if (!bus) return;
     const wetMix = clampNumber(wet, 0.2, 0, 1);
-    bus.output.gain.value = clampNumber(volume, 0.9, 0, 1);
-    bus.wet.gain.value = wetMix;
-    bus.dry.gain.value = 1 - wetMix;
+    const delayMix = clampNumber(synthSettings?.delayMix, 0, 0, 1);
+    const delayFeedback = clampNumber(synthSettings?.delayFeedback, 0.25, 0, 0.88);
+    const delayFilterCutoff = clampNumber(synthSettings?.delayFilterCutoff, 2800, 300, 8000);
+    const delaySeconds = getDelayTimeSeconds(synthSettings);
+    setAudioParamSmooth(bus.output.gain, clampNumber(volume, 0.9, 0, 1));
+    setAudioParamSmooth(bus.wet.gain, wetMix);
+    setAudioParamSmooth(bus.dry.gain, 1 - wetMix);
+    setAudioParamSmooth(bus.delayDry.gain, 1 - delayMix);
+    setAudioParamSmooth(bus.delayWet.gain, delayMix);
+    setAudioParamSmooth(bus.delayFeedback.gain, delayFeedback);
+    setAudioParamSmooth(bus.delay.delayTime, delaySeconds);
+    setAudioParamSmooth(bus.delayFilter.frequency, delayFilterCutoff);
   };
 
-  setBus('chord', mixer.chordVolume, reverb.chordWet);
-  setBus('bass', mixer.bassVolume, reverb.bassWet);
-  setBus('string', mixer.stringVolume, reverb.stringWet);
+  setBus('chord', mixer.chordVolume, reverb.chordWet, song.chordSynth);
+  setBus('bass', mixer.bassVolume, reverb.bassWet, song.bassSynth);
+  setBus('string', mixer.stringVolume, reverb.stringWet, song.stringSynth);
   if (audioRouting.drums) {
-    audioRouting.drums.output.gain.value = clampNumber(mixer.drumsVolume, 0.9, 0, 1);
+    setAudioParamSmooth(audioRouting.drums.output.gain, clampNumber(mixer.drumsVolume, 0.9, 0, 1));
   }
 }
 
@@ -2942,6 +3087,22 @@ function scheduleADSR(gainNode, time, peak, sustain, attack, decay, release, dur
   return noteEnd;
 }
 
+function createMultiPoleFilterChain(ctx, time, synthSettings) {
+  const filterPoles = normalizeFilterPoles(synthSettings?.filterPoles, 1);
+  const filterCount = filterPoles === 4 ? 4 : filterPoles === 2 ? 2 : 1;
+  const cutoff = clampNumber(synthSettings?.cutoff, 1200, 120, 6000);
+  const resonance = clampNumber(synthSettings?.resonance, 1, 0.2, 12);
+  const filters = Array.from({ length: filterCount }, () => ctx.createBiquadFilter());
+  filters.forEach((filter, index) => {
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(cutoff, time);
+    const stageQ = index === filters.length - 1 ? resonance : Math.max(0.2, resonance * 0.5);
+    filter.Q.setValueAtTime(stageQ, time);
+    if (index > 0) filters[index - 1].connect(filter);
+  });
+  return { filters, input: filters[0], output: filters[filters.length - 1] };
+}
+
 const distortionCurveCache = new Map();
 function getDistortionCurve(amount) {
   const normalized = Math.max(0, Math.min(1, Number(amount) || 0));
@@ -2961,20 +3122,17 @@ function getDistortionCurve(amount) {
 function playSynthVoice(freq, time, duration, synthSettings, kind = 'chord') {
   const ctx = getAudioCtx();
   const voiceGain = ctx.createGain();
-  const filter = ctx.createBiquadFilter();
-  filter.type = 'lowpass';
-  filter.frequency.setValueAtTime(synthSettings.cutoff, time);
-  filter.Q.setValueAtTime(synthSettings.resonance, time);
+  const filterChain = createMultiPoleFilterChain(ctx, time, synthSettings);
   const driveAmount = clampNumber(synthSettings.distortion, 0, 0, 1);
   let shaper = null;
   if (driveAmount > 0.001) {
     shaper = ctx.createWaveShaper();
     shaper.curve = getDistortionCurve(driveAmount);
     shaper.oversample = '2x';
-    filter.connect(shaper);
+    filterChain.output.connect(shaper);
     shaper.connect(voiceGain);
   } else {
-    filter.connect(voiceGain);
+    filterChain.output.connect(voiceGain);
   }
   voiceGain.connect(audioRouting?.[kind]?.input || ctx.destination);
 
@@ -3001,7 +3159,7 @@ function playSynthVoice(freq, time, duration, synthSettings, kind = 'chord') {
     oscillator.frequency.setValueAtTime(oscillatorFreq, time);
     mixGain.gain.value = config.gain;
     oscillator.connect(mixGain);
-    mixGain.connect(filter);
+    mixGain.connect(filterChain.input);
     oscillators.push(oscillator);
     mixGains.push(mixGain);
     oscillatorFreqs.push(oscillatorFreq);
@@ -3042,7 +3200,7 @@ function playSynthVoice(freq, time, duration, synthSettings, kind = 'chord') {
   });
   if (lfo) lfo.stop(noteEnd + 0.02);
   const sources = [...oscillators];
-  const nodes = [voiceGain, filter, ...oscillators, ...mixGains];
+  const nodes = [voiceGain, ...filterChain.filters, ...oscillators, ...mixGains];
   if (shaper) nodes.push(shaper);
   if (lfo) {
     sources.push(lfo);
@@ -3899,8 +4057,8 @@ function buildSynthCard(kind) {
   const subtitle = document.createElement('p');
   subtitle.className = 'synth-subtitle';
   subtitle.textContent = kind === 'string'
-    ? '4 osc • transpose • ADSR • filter • drive • mod • tone • reverb'
-    : '2 osc • transpose • ADSR • filter • drive • mod • tone • reverb';
+    ? '4 osc • transpose • ADSR • multi-pole filter • delay • drive • mod • tone • reverb'
+    : '2 osc • transpose • ADSR • multi-pole filter • delay • drive • mod • tone • reverb';
   titleWrap.append(title, subtitle);
 
   const controls = document.createElement('div');
@@ -4037,6 +4195,27 @@ function buildSynthCard(kind) {
         value => updateSynthWaveform(kind, 'osc4Type', value),
       ));
     }
+    controlsGrid.appendChild(buildSynthSelectControl(
+      'Filter slope',
+      String(normalizeFilterPoles(synth.filterPoles, 1)),
+      FILTER_POLE_OPTIONS.map(option => ({ value: String(option.value), label: option.label })),
+      `${kind} filter slope`,
+      value => updateSynthSelectField(kind, 'filterPoles', value),
+    ));
+    controlsGrid.appendChild(buildSynthSelectControl(
+      'Delay time',
+      String(normalizeDelaySubdivision(synth.delaySubdivisionBeats, 0.5)),
+      DELAY_SUBDIVISION_OPTIONS.map(option => ({ value: String(option.value), label: option.label })),
+      `${kind} delay subdivision`,
+      value => updateSynthSelectField(kind, 'delaySubdivisionBeats', value),
+    ));
+    controlsGrid.appendChild(buildSynthSelectControl(
+      'Delay feel',
+      normalizeDelayFeel(synth.delayFeel, 'straight'),
+      DELAY_FEEL_OPTIONS.map(option => ({ value: option.value, label: option.label })),
+      `${kind} delay feel`,
+      value => updateSynthSelectField(kind, 'delayFeel', value),
+    ));
     SYNTH_UI_FIELDS.forEach(field => controlsGrid.appendChild(buildSynthSlider(kind, synth, field)));
     controlsGrid.appendChild(buildReverbSlider(kind));
 
@@ -4057,12 +4236,15 @@ function buildSynthSelectControl(labelText, currentValue, options, ariaLabel, on
   const select = document.createElement('select');
   select.setAttribute('aria-label', ariaLabel);
   options.forEach(optionValue => {
+    const normalizedOption = typeof optionValue === 'object' && optionValue !== null
+      ? optionValue
+      : { value: optionValue, label: optionValue };
     const option = document.createElement('option');
-    option.value = optionValue;
-    option.textContent = optionValue;
+    option.value = String(normalizedOption.value);
+    option.textContent = normalizedOption.label;
     select.appendChild(option);
   });
-  select.value = currentValue;
+  select.value = String(currentValue);
   select.addEventListener('change', () => onChange(select.value));
   row.append(top, select);
   return row;
