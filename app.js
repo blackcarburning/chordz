@@ -923,12 +923,23 @@ function beatOffsetToSeconds(beats) {
 // SONG MUTATIONS
 // =====================================================================
 
-function commitSong({ rerender = false, refreshCursor = false, flushNoteBuffer = false } = {}) {
+function commitSong({
+  rerender = false,
+  refreshCursor = false,
+  flushNoteBuffer = false,
+  snapToChordStart = false,
+} = {}) {
   songVersion += 1;
   saveSong();
   applyAudioMixSettings();
-  if (refreshCursor && isBeating && !rerender) initializePlaybackCursor();
-  if (flushNoteBuffer) flushScheduledNotes({ restartPlayback: isBeating });
+  const shouldRefreshCursor = refreshCursor && isBeating;
+  if (shouldRefreshCursor) initializePlaybackCursor();
+  if (flushNoteBuffer || shouldRefreshCursor) {
+    flushScheduledNotes({
+      restartPlayback: isBeating,
+      snapToChordStart: snapToChordStart || shouldRefreshCursor,
+    });
+  }
   if (rerender) {
     render();
     return;
@@ -938,11 +949,35 @@ function commitSong({ rerender = false, refreshCursor = false, flushNoteBuffer =
 }
 
 function handleSchedulingParameterChange({ rerender = false, refreshCursor = false } = {}) {
-  commitSong({ rerender, refreshCursor, flushNoteBuffer: true });
+  commitSong({
+    rerender,
+    refreshCursor,
+    flushNoteBuffer: true,
+    snapToChordStart: true,
+  });
 }
 
 function handleSynthParameterChange({ rerender = false, refreshCursor = false } = {}) {
   commitSong({ rerender, refreshCursor });
+}
+
+function snapPlaybackCursorToChordStart() {
+  const mode = song.playbackMode || 'edit';
+  if (usesSongTimelineMode(mode)) {
+    const map = buildSongBeatMap();
+    if (!map.length) return;
+    const currentIndex = Math.max(0, Math.min(map.length - 1, playbackCursor.songBeatIndex));
+    const currentPoint = map[currentIndex];
+    if (!currentPoint) return;
+    const targetIndex = Math.max(0, currentIndex - currentPoint.beatInChord);
+    const targetPoint = map[targetIndex] || currentPoint;
+    setPlaybackCursorFromPoint(targetPoint, targetIndex);
+  } else {
+    const beatInChord = Math.max(0, clampInt(playbackCursor.beatInChord, 0, 0, 63));
+    playbackCursor.beatInSection = Math.max(0, playbackCursor.beatInSection - beatInChord);
+    playbackCursor.beatInChord = 0;
+  }
+  updatePlaybackPositionUI(playbackCursor.sectionIndex, playbackCursor.chordIndex, playbackCursor.beatInChord, playbackCursor.songBeatIndex);
 }
 
 function addSection(type) {
@@ -1052,7 +1087,7 @@ function setSynthPreset(kind, presetId) {
 
 function setBassEnabled(enabled) {
   song.bassEnabled = Boolean(enabled);
-  commitSong({ flushNoteBuffer: true });
+  commitSong({ flushNoteBuffer: true, snapToChordStart: true });
 }
 
 function setBassPitchMode(mode) {
@@ -1063,7 +1098,7 @@ function setBassPitchMode(mode) {
 
 function setStringEnabled(enabled) {
   song.stringEnabled = Boolean(enabled);
-  commitSong({ flushNoteBuffer: true });
+  commitSong({ flushNoteBuffer: true, snapToChordStart: true });
 }
 
 function setStringPitchMode(mode) {
@@ -1314,7 +1349,7 @@ function updateBpm(raw) {
   song.bpm = value;
   const element = document.getElementById('bpm-input');
   if (element && parseInt(element.value, 10) !== value) element.value = value;
-  commitSong({ flushNoteBuffer: true });
+  commitSong({ flushNoteBuffer: true, snapToChordStart: true });
 }
 
 function updateMixerField(field, value) {
@@ -1381,7 +1416,7 @@ function updateDrumStep(patternId, laneKey, step) {
   const pattern = song.drumPatterns?.find(p => p.id === patternId);
   if (!pattern) return;
   pattern.grid[laneKey][step] = pattern.grid[laneKey][step] ? 0 : 1;
-  commitSong();
+  handleSchedulingParameterChange();
 }
 
 function updateDrumPatternName(patternId, name) {
@@ -1403,7 +1438,7 @@ function selectEditDrumPattern(patternId) {
     activeSection.drumPatternId = patternId;
     const sectionDrumSelect = document.querySelector(`.section[data-id="${activeSection.id}"] .section-drum-pattern-select`);
     if (sectionDrumSelect) sectionDrumSelect.value = patternId;
-    commitSong();
+    handleSchedulingParameterChange();
   }
   renderDrumSequencer();
 }
@@ -1417,7 +1452,7 @@ function updateSectionDrumPattern(sectionId, patternId) {
     editingDrumPatternId = patternId;
     renderDrumSequencer();
   }
-  commitSong();
+  handleSchedulingParameterChange();
 }
 
 // =====================================================================
@@ -2502,7 +2537,7 @@ function stopAndClearActiveAudioNodes() {
   });
 }
 
-function flushScheduledNotes({ restartPlayback = false } = {}) {
+function flushScheduledNotes({ restartPlayback = false, snapToChordStart = false } = {}) {
   schedulerGeneration += 1;
   if (schedulerTimer !== null) {
     clearTimeout(schedulerTimer);
@@ -2515,6 +2550,7 @@ function flushScheduledNotes({ restartPlayback = false } = {}) {
   songEndedPending = false;
   stopAndClearActiveAudioNodes();
   if (!(restartPlayback && isBeating)) return;
+  if (snapToChordStart) snapPlaybackCursorToChordStart();
   currentStep = 0;
   currentBeatStepBase = getSectionSixteenthOffset(playbackCursor.beatInSection);
   nextNoteTime = getAudioCtx().currentTime + 0.05;
