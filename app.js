@@ -937,6 +937,14 @@ function commitSong({ rerender = false, refreshCursor = false, flushNoteBuffer =
   updatePlaybackHighlights();
 }
 
+function handleSchedulingParameterChange({ rerender = false, refreshCursor = false } = {}) {
+  commitSong({ rerender, refreshCursor, flushNoteBuffer: true });
+}
+
+function handleSynthParameterChange() {
+  commitSong();
+}
+
 function addSection(type) {
   const section = createSection(type);
   section.drumPatternId = song.drumPatterns?.[0]?.id || null;
@@ -1032,7 +1040,7 @@ function setSynthPreset(kind, presetId) {
     song.chordSound = resolved;
     song.chordSynth = createSynthSettings('chord', resolved);
   }
-  commitSong({ flushNoteBuffer: true });
+  handleSynthParameterChange();
   renderSynthRack();
 }
 
@@ -1074,7 +1082,8 @@ function updateSynthField(kind, fieldKey, value) {
   if (kind === 'bass') song.bassSound = 'custom';
   else if (kind === 'string') song.stringSound = 'custom';
   else song.chordSound = 'custom';
-  commitSong({ flushNoteBuffer: true });
+  if (fieldKey === 'transpose') handleSchedulingParameterChange();
+  else handleSynthParameterChange();
   const presetSelect = document.getElementById(`${kind}-preset-select`);
   if (presetSelect) presetSelect.value = 'custom';
 }
@@ -1090,7 +1099,7 @@ function updateSynthWaveform(kind, fieldKey, value) {
   if (kind === 'bass') song.bassSound = 'custom';
   else if (kind === 'string') song.stringSound = 'custom';
   else song.chordSound = 'custom';
-  commitSong({ flushNoteBuffer: true });
+  handleSynthParameterChange();
   renderSynthRack();
 }
 
