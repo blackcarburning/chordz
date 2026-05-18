@@ -53,6 +53,8 @@
       <div class="ctrl-group song-actions">
         <button class="action-btn" id="save-btn" title="Save to browser storage">💾 Save</button>
         <button class="action-btn" id="export-btn" title="Export song as JSON file">📤 Export</button>
+        <button class="action-btn" id="export-wav-btn" title="Export full song to WAV audio file">🎧 Export WAV</button>
+        <button class="action-btn" id="export-midi-btn" title="Export full song to MIDI file">🎼 Export MIDI</button>
         <button class="action-btn" id="import-btn" title="Import song from JSON file">📥 Import</button>
         <button class="action-btn" id="debug-toggle" title="Show debug panel" aria-expanded="false">🐞 Debug ▸</button>
         <button class="action-btn danger" id="new-btn" title="Start a new song">🆕 New</button>
@@ -210,7 +212,7 @@
           <dd>Each section has checkboxes for a crash cymbal at section start and a simple roll at section end.</dd>
 
           <dt>💾 Save / Export / Import</dt>
-          <dd>Save stores songs in your browser and remembers the last opened song. Use Open most recent to load recent songs. Export/import includes song metadata, sections, beats, repeats, synths, reverb, mixer, arranger, drum patterns, per-section drum pattern assignments, and playback settings. Older JSON files load successfully with default drum patterns added automatically. 🆕 New clears everything.</dd>
+          <dd>Save stores songs in your browser and remembers the last opened song. Use Open most recent to load recent songs. Export/import includes song metadata, sections, beats, repeats, synths, reverb, mixer, arranger, drum patterns, per-section drum pattern assignments, and playback settings. Use Export WAV / Export MIDI to render the full arranged song to audio or MIDI. Older JSON files load successfully with default drum patterns added automatically. 🆕 New clears everything.</dd>
         </dl>
       </div>
     </details>

@@ -39,6 +39,7 @@ Replaces the old preset beat with a fully editable pattern-based drum sequencer:
 * **Draggable arranger** – Add section entries, set repeat counts per entry, and drag to reorder song playback order. Song mode follows arranger entries/repeats when present, and falls back to section order when arranger is empty.
 * **Section transitions** – Optional per-section crash cymbal at section start and roll at section end.
 * **Song naming + recents** – A song title box is always visible, and an **Open most recent** dropdown lists recent songs with last-updated timestamps.
+* **Song export to WAV + MIDI** – Export the full arranged song (including timing/repeats/beat starts/chords/bass/strings/arps/drums) to `.wav` audio or `.mid` MIDI.
 * **Persistence** – Songs are saved automatically to browser storage and the most recently edited/opened song is restored on load. Drum patterns (grids, names, and per-section assignments) are fully persisted in browser storage. Export/import includes song metadata, sections/chords (including bass pitch roots, start beats, per-chord Loop toggles, and per-chord Arp mode), bass linked/free mode, drum patterns, per-section drum pattern assignments, drummer volume, chord lengths, chord+bass+string repeats, synth settings (waveforms, transpose, distortion, modulation, tone controls), per-instrument reverb, mixer levels, DAW ordering, crash/roll options, arranger order/repeats, playback mode, and sound selections. Older JSON files load successfully with safe defaults for newer fields.
 
 ## Running locally

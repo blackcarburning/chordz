@@ -1583,14 +1583,7 @@ function exportJSON() {
   saveSong();
   const json = JSON.stringify(song, null, 2);
   const blob = new Blob([json], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = sanitizeFilename(song.title || 'song') + '.chordz.json';
-  document.body.appendChild(anchor);
-  anchor.click();
-  document.body.removeChild(anchor);
-  URL.revokeObjectURL(url);
+  downloadBlob(blob, sanitizeFilename(song.title || 'song') + '.chordz.json');
 }
 
 function importJSON() {
@@ -1619,6 +1612,721 @@ function importJSON() {
 
 function sanitizeFilename(str) {
   return str.replace(/[^a-z0-9_\-]/gi, '_').toLowerCase().replace(/__+/g, '_').slice(0, 60) || 'song';
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+}
+
+function secondsToBeats(seconds) {
+  const bpm = clampInt(song.bpm, 100, 40, 300);
+  return Math.max(0, Number(seconds) || 0) / (60 / bpm);
+}
+
+function addHarmonicNoteEvents(target, {
+  baseBeat,
+  rootMidi,
+  intervals,
+  totalBeats,
+  repeats,
+  startBeat,
+  arpMode = 'off',
+  durationScale = 0.92,
+  minDurationSeconds = 0.1,
+}) {
+  if (!Array.isArray(intervals) || !intervals.length) return;
+  const normalizedBeats = clampInt(totalBeats, 4, 1, 64);
+  const repeatCount = normalizeRepeat(repeats, 1);
+  const effectiveStartBeat = Math.min(normalizedBeats, normalizeStartBeat(startBeat, 1));
+  const startOffsetBeats = effectiveStartBeat - 1;
+  const activeBeats = Math.max(0.25, normalizedBeats - startOffsetBeats);
+  if (arpMode !== 'off') {
+    const arpStepPattern = buildArpStepPattern(intervals.length, arpMode);
+    if (!arpStepPattern.length) return;
+    const stepBeats = 0.5;
+    const stepDurationBeats = Math.max(secondsToBeats(0.05), stepBeats * 0.88);
+    const blockStartBeat = baseBeat + startOffsetBeats;
+    const blockEndBeat = baseBeat + normalizedBeats;
+    let step = 0;
+    let hitBeat = blockStartBeat;
+    while (hitBeat < blockEndBeat - 0.0001) {
+      const remainingBeats = blockEndBeat - hitBeat;
+      if (remainingBeats <= 0.0001) break;
+      const actualDurationBeats = Math.min(
+        stepDurationBeats,
+        Math.max(secondsToBeats(0.04), remainingBeats * 0.95),
+      );
+      const intervalIndex = arpStepPattern[step % arpStepPattern.length];
+      target.push({
+        beat: hitBeat,
+        durationBeats: actualDurationBeats,
+        midi: rootMidi + intervals[intervalIndex],
+      });
+      step += 1;
+      hitBeat += stepBeats;
+    }
+    return;
+  }
+  const hitBeats = Math.max(0.25, activeBeats / repeatCount);
+  const hitDurationBeats = Math.max(secondsToBeats(minDurationSeconds), hitBeats * durationScale);
+  for (let hit = 0; hit < repeatCount; hit++) {
+    const hitBeat = baseBeat + startOffsetBeats + hit * hitBeats;
+    intervals.forEach(interval => {
+      target.push({
+        beat: hitBeat,
+        durationBeats: hitDurationBeats,
+        midi: rootMidi + interval,
+      });
+    });
+  }
+}
+
+function collectSongExportEvents() {
+  const events = {
+    notes: { chord: [], bass: [], string: [] },
+    drums: [],
+    totalBeats: 0,
+  };
+  const sequence = getSongSectionSequence();
+  const patterns = song.drumPatterns || [];
+  let songBeatCursor = 0;
+
+  sequence.forEach(sequencePoint => {
+    const section = song.sections[sequencePoint.sectionIndex];
+    if (!section) return;
+    const sectionStartBeat = songBeatCursor;
+    const sectionBeats = getSectionBeatLength(section);
+    if (section.crashOnStart) {
+      events.drums.push({
+        beat: sectionStartBeat,
+        laneKey: 'crash',
+        durationBeats: secondsToBeats(0.8),
+      });
+    }
+    let chordBeatOffset = 0;
+    section.chords.forEach(chord => {
+      const chordBeats = clampInt(chord.beats, 4, 1, 64);
+      const chordStartBeat = getChordPlaybackStartBeat(chord, chordBeats);
+      const chordNoteCount = clampInt(chord.noteCount, chordTypeObj(chord.type).intervals.length, 1, 16);
+      const absoluteChordBeat = sectionStartBeat + chordBeatOffset;
+      addHarmonicNoteEvents(events.notes.chord, {
+        baseBeat: absoluteChordBeat,
+        rootMidi: 60 + chord.root + getSynthTranspose(song.chordSynth),
+        intervals: buildChordIntervals(chord.type, chordNoteCount),
+        totalBeats: chordBeats,
+        repeats: chord.chordRepeat || 1,
+        startBeat: chordStartBeat,
+        arpMode: chord.arpMode || 'off',
+        durationScale: 0.92,
+        minDurationSeconds: 0.1,
+      });
+      if (song.bassEnabled) {
+        addHarmonicNoteEvents(events.notes.bass, {
+          baseBeat: absoluteChordBeat,
+          rootMidi: 36 + getChordBassRoot(chord) + getSynthTranspose(song.bassSynth),
+          intervals: [0],
+          totalBeats: chordBeats,
+          repeats: chord.bassRepeat || 1,
+          startBeat: chordStartBeat,
+          durationScale: 0.9,
+          minDurationSeconds: 0.09,
+        });
+      }
+      if (song.stringEnabled) {
+        addHarmonicNoteEvents(events.notes.string, {
+          baseBeat: absoluteChordBeat,
+          rootMidi: 48 + getChordStringRoot(chord) + getSynthTranspose(song.stringSynth),
+          intervals: buildChordIntervals(chord.type, chordNoteCount),
+          totalBeats: chordBeats,
+          repeats: chord.stringRepeat || chord.chordRepeat || 1,
+          startBeat: chordStartBeat,
+          durationScale: 0.92,
+          minDurationSeconds: 0.1,
+        });
+      }
+      chordBeatOffset += chordBeats;
+    });
+
+    const pattern = patterns.find(entry => entry.id === section.drumPatternId) || patterns[0];
+    if (pattern && sectionBeats > 0) {
+      for (let beatInSection = 0; beatInSection < sectionBeats; beatInSection++) {
+        const stepBase = getSectionSixteenthOffset(beatInSection);
+        for (let subdivision = 0; subdivision < 4; subdivision++) {
+          const step = (stepBase + subdivision) % STEPS;
+          const beat = sectionStartBeat + beatInSection + subdivision / 4;
+          DRUM_LANES.forEach(lane => {
+            if (!pattern.grid[lane.key]?.[step]) return;
+            events.drums.push({
+              beat,
+              laneKey: lane.key,
+              durationBeats: 0.125,
+            });
+          });
+        }
+      }
+    }
+
+    if (section.rollAtEnd && sectionBeats > 0) {
+      const rollStartBeat = sectionStartBeat + sectionBeats - 1;
+      for (let hit = 0; hit < 6; hit++) {
+        events.drums.push({
+          beat: rollStartBeat + secondsToBeats(hit * 0.06),
+          laneKey: 'rollSnare',
+          durationBeats: secondsToBeats(0.09),
+        });
+      }
+    }
+    songBeatCursor += sectionBeats;
+  });
+
+  events.totalBeats = songBeatCursor;
+  return events;
+}
+
+function createOfflineImpulseResponse(ctx, seconds = 1.8, decay = 2.2) {
+  const length = Math.floor(ctx.sampleRate * seconds);
+  const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
+  for (let channel = 0; channel < impulse.numberOfChannels; channel++) {
+    const data = impulse.getChannelData(channel);
+    for (let index = 0; index < length; index++) {
+      const t = index / Math.max(1, length - 1);
+      data[index] = (Math.random() * 2 - 1) * Math.pow(1 - t, decay);
+    }
+  }
+  return impulse;
+}
+
+function createOfflineRouting(ctx) {
+  const master = ctx.createGain();
+  master.connect(ctx.destination);
+  const makeInstrumentBus = () => {
+    const input = ctx.createGain();
+    const dry = ctx.createGain();
+    const wet = ctx.createGain();
+    const output = ctx.createGain();
+    const convolver = ctx.createConvolver();
+    convolver.buffer = createOfflineImpulseResponse(ctx);
+    input.connect(dry);
+    input.connect(convolver);
+    convolver.connect(wet);
+    dry.connect(output);
+    wet.connect(output);
+    output.connect(master);
+    return { input, dry, wet, output, convolver };
+  };
+  const drumsGain = ctx.createGain();
+  drumsGain.connect(master);
+  return {
+    master,
+    chord: makeInstrumentBus(),
+    bass: makeInstrumentBus(),
+    string: makeInstrumentBus(),
+    drums: { input: drumsGain, output: drumsGain },
+  };
+}
+
+function applyOfflineMixSettings(routing) {
+  const mixer = song.mixer || {};
+  const reverb = song.reverb || {};
+  routing.master.gain.value = clampNumber(mixer.masterVolume, 0.95, 0, 1);
+  const setBus = (kind, volume, wet) => {
+    const bus = routing[kind];
+    if (!bus) return;
+    const wetMix = clampNumber(wet, 0.2, 0, 1);
+    bus.output.gain.value = clampNumber(volume, 0.9, 0, 1);
+    bus.wet.gain.value = wetMix;
+    bus.dry.gain.value = 1 - wetMix;
+  };
+  setBus('chord', mixer.chordVolume, reverb.chordWet);
+  setBus('bass', mixer.bassVolume, reverb.bassWet);
+  setBus('string', mixer.stringVolume, reverb.stringWet);
+  routing.drums.output.gain.value = clampNumber(mixer.drumsVolume, 0.9, 0, 1);
+}
+
+function createNoiseBufferForContext(ctx, cache, duration) {
+  const cacheKey = `${Math.round(duration * 1000)}`;
+  if (cache.has(cacheKey)) return cache.get(cacheKey);
+  const length = Math.floor(ctx.sampleRate * duration);
+  const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let index = 0; index < length; index++) data[index] = Math.random() * 2 - 1;
+  cache.set(cacheKey, buffer);
+  return buffer;
+}
+
+function renderSynthVoiceOffline(ctx, routing, freq, time, duration, synthSettings, kind = 'chord') {
+  const voiceGain = ctx.createGain();
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(synthSettings.cutoff, time);
+  filter.Q.setValueAtTime(synthSettings.resonance, time);
+  const driveAmount = clampNumber(synthSettings.distortion, 0, 0, 1);
+  let shaper = null;
+  if (driveAmount > 0.001) {
+    shaper = ctx.createWaveShaper();
+    shaper.curve = getDistortionCurve(driveAmount);
+    shaper.oversample = '2x';
+    filter.connect(shaper);
+    shaper.connect(voiceGain);
+  } else {
+    filter.connect(voiceGain);
+  }
+  voiceGain.connect(routing[kind]?.input || ctx.destination);
+
+  const isStringVoice = kind === 'string';
+  const oscConfigs = isStringVoice
+    ? [
+      { type: synthSettings.osc1Type, freqOffsetCents: 0, gain: Math.max(0.03, (1 - synthSettings.mix) * 0.5) },
+      { type: synthSettings.osc2Type, freqOffsetCents: synthSettings.osc2Interval * 100 + synthSettings.detune, gain: Math.max(0.03, synthSettings.mix * 0.5) },
+      { type: synthSettings.osc3Type || synthSettings.osc1Type, freqOffsetCents: 1200 + synthSettings.detune * 0.5, gain: Math.max(0.03, (1 - synthSettings.mix) * 0.42) },
+      { type: synthSettings.osc4Type || synthSettings.osc2Type, freqOffsetCents: 1200 + synthSettings.osc2Interval * 100 - synthSettings.detune * 0.5, gain: Math.max(0.03, synthSettings.mix * 0.42) },
+    ]
+    : [
+      { type: synthSettings.osc1Type, freqOffsetCents: 0, gain: Math.max(0.05, 1 - synthSettings.mix) },
+      { type: synthSettings.osc2Type, freqOffsetCents: synthSettings.osc2Interval * 100 + synthSettings.detune, gain: Math.max(0.05, synthSettings.mix) },
+    ];
+  const oscillators = [];
+  const oscillatorFreqs = [];
+  oscConfigs.forEach(config => {
+    const oscillator = ctx.createOscillator();
+    const mixGain = ctx.createGain();
+    const oscillatorFreq = freq * Math.pow(2, config.freqOffsetCents / 1200);
+    oscillator.type = config.type;
+    oscillator.frequency.setValueAtTime(oscillatorFreq, time);
+    mixGain.gain.value = config.gain;
+    oscillator.connect(mixGain);
+    mixGain.connect(filter);
+    oscillators.push(oscillator);
+    oscillatorFreqs.push(oscillatorFreq);
+  });
+
+  const modRate = clampNumber(synthSettings.modRate, 0, 0, 12);
+  const modDepth = clampNumber(synthSettings.modDepth, 0, 0, 80);
+  let lfo = null;
+  if (modRate > 0.01 && modDepth > 0.01) {
+    lfo = ctx.createOscillator();
+    lfo.frequency.setValueAtTime(modRate, time);
+    oscillators.forEach((oscillator, index) => {
+      const lfoGain = ctx.createGain();
+      const depthHz = oscillatorFreqs[index] * (Math.pow(2, modDepth / 1200) - 1);
+      lfoGain.gain.setValueAtTime(depthHz, time);
+      lfo.connect(lfoGain);
+      lfoGain.connect(oscillator.frequency);
+    });
+    lfo.start(time);
+  }
+
+  const noteEnd = scheduleADSR(
+    voiceGain,
+    time,
+    synthSettings.volume,
+    synthSettings.sustain,
+    synthSettings.attack,
+    synthSettings.decay,
+    synthSettings.release,
+    duration,
+  );
+  oscillators.forEach(oscillator => {
+    oscillator.start(time);
+    oscillator.stop(noteEnd + 0.02);
+  });
+  if (lfo) lfo.stop(noteEnd + 0.02);
+}
+
+function renderDrumLaneOffline(ctx, drumsInput, noiseCache, laneKey, time) {
+  if (laneKey === 'rollSnare') laneKey = 'snare';
+  switch (laneKey) {
+    case 'kick': {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(drumsInput);
+      osc.frequency.setValueAtTime(120, time);
+      osc.frequency.exponentialRampToValueAtTime(40, time + 0.12);
+      gain.gain.setValueAtTime(0.0001, time);
+      gain.gain.linearRampToValueAtTime(1.05, time + 0.004);
+      gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.35);
+      osc.start(time);
+      osc.stop(time + 0.35);
+      break;
+    }
+    case 'snare': {
+      const noise = ctx.createBufferSource();
+      noise.buffer = createNoiseBufferForContext(ctx, noiseCache, 0.16);
+      const noiseFilter = ctx.createBiquadFilter();
+      noiseFilter.type = 'highpass';
+      noiseFilter.frequency.value = 1600;
+      const noiseGain = ctx.createGain();
+      noise.connect(noiseFilter);
+      noiseFilter.connect(noiseGain);
+      noiseGain.connect(drumsInput);
+      noiseGain.gain.setValueAtTime(0.0001, time);
+      noiseGain.gain.linearRampToValueAtTime(0.65, time + 0.002);
+      noiseGain.gain.exponentialRampToValueAtTime(0.0001, time + 0.14);
+      noise.start(time);
+      noise.stop(time + 0.16);
+
+      const osc = ctx.createOscillator();
+      const oscGain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.connect(oscGain);
+      oscGain.connect(drumsInput);
+      osc.frequency.setValueAtTime(220, time);
+      osc.frequency.exponentialRampToValueAtTime(110, time + 0.08);
+      oscGain.gain.setValueAtTime(0.0001, time);
+      oscGain.gain.linearRampToValueAtTime(0.36, time + 0.002);
+      oscGain.gain.exponentialRampToValueAtTime(0.0001, time + 0.09);
+      osc.start(time);
+      osc.stop(time + 0.09);
+      break;
+    }
+    case 'closedHat': {
+      const noise = ctx.createBufferSource();
+      noise.buffer = createNoiseBufferForContext(ctx, noiseCache, 0.05);
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'highpass';
+      filter.frequency.value = 7000;
+      const gain = ctx.createGain();
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(drumsInput);
+      gain.gain.setValueAtTime(0.0001, time);
+      gain.gain.linearRampToValueAtTime(0.2, time + 0.001);
+      gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.045);
+      noise.start(time);
+      noise.stop(time + 0.05);
+      break;
+    }
+    case 'openHat': {
+      const noise = ctx.createBufferSource();
+      noise.buffer = createNoiseBufferForContext(ctx, noiseCache, 0.45);
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'highpass';
+      filter.frequency.value = 5000;
+      const gain = ctx.createGain();
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(drumsInput);
+      gain.gain.setValueAtTime(0.0001, time);
+      gain.gain.linearRampToValueAtTime(0.28, time + 0.002);
+      gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.4);
+      noise.start(time);
+      noise.stop(time + 0.45);
+      break;
+    }
+    case 'hiTom':
+    case 'midTom':
+    case 'lowTom': {
+      const config = laneKey === 'hiTom'
+        ? { startFreq: 260, endFreq: 150, endTime: 0.15, peak: 0.75, fade: 0.22, stop: 0.25 }
+        : laneKey === 'midTom'
+          ? { startFreq: 190, endFreq: 100, endTime: 0.18, peak: 0.75, fade: 0.28, stop: 0.32 }
+          : { startFreq: 130, endFreq: 65, endTime: 0.22, peak: 0.8, fade: 0.34, stop: 0.38 };
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(drumsInput);
+      osc.frequency.setValueAtTime(config.startFreq, time);
+      osc.frequency.exponentialRampToValueAtTime(config.endFreq, time + config.endTime);
+      gain.gain.setValueAtTime(0.0001, time);
+      gain.gain.linearRampToValueAtTime(config.peak, time + 0.003);
+      gain.gain.exponentialRampToValueAtTime(0.0001, time + config.fade);
+      osc.start(time);
+      osc.stop(time + config.stop);
+      break;
+    }
+    case 'ride': {
+      const masterGain = ctx.createGain();
+      masterGain.connect(drumsInput);
+      masterGain.gain.setValueAtTime(0.0001, time);
+      masterGain.gain.linearRampToValueAtTime(0.18, time + 0.002);
+      masterGain.gain.exponentialRampToValueAtTime(0.0001, time + 0.28);
+      [560, 845, 1174, 1523, 1780].forEach(freq => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        gain.gain.value = 0.04;
+        osc.type = 'square';
+        osc.frequency.value = freq;
+        osc.connect(gain);
+        gain.connect(masterGain);
+        osc.start(time);
+        osc.stop(time + 0.3);
+      });
+      break;
+    }
+    case 'crash': {
+      const source = ctx.createBufferSource();
+      source.buffer = createNoiseBufferForContext(ctx, noiseCache, 0.8);
+      const highpass = ctx.createBiquadFilter();
+      highpass.type = 'highpass';
+      highpass.frequency.value = 3500;
+      const bandpass = ctx.createBiquadFilter();
+      bandpass.type = 'bandpass';
+      bandpass.frequency.value = 6200;
+      bandpass.Q.value = 0.7;
+      const gain = ctx.createGain();
+      source.connect(highpass);
+      highpass.connect(bandpass);
+      bandpass.connect(gain);
+      gain.connect(drumsInput);
+      gain.gain.setValueAtTime(0.0001, time);
+      gain.gain.linearRampToValueAtTime(0.45, time + 0.003);
+      gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.8);
+      source.start(time);
+      source.stop(time + 0.8);
+      break;
+    }
+  }
+}
+
+function audioBufferToWavBlob(audioBuffer) {
+  const channelCount = audioBuffer.numberOfChannels;
+  const sampleRate = audioBuffer.sampleRate;
+  const frameCount = audioBuffer.length;
+  const bytesPerSample = 2;
+  const blockAlign = channelCount * bytesPerSample;
+  const dataSize = frameCount * blockAlign;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  const writeString = (offset, str) => {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+  };
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, channelCount, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * blockAlign, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bytesPerSample * 8, true);
+  writeString(36, 'data');
+  view.setUint32(40, dataSize, true);
+  const channelData = [];
+  for (let channel = 0; channel < channelCount; channel++) channelData.push(audioBuffer.getChannelData(channel));
+  let offset = 44;
+  for (let frame = 0; frame < frameCount; frame++) {
+    for (let channel = 0; channel < channelCount; channel++) {
+      const sample = Math.max(-1, Math.min(1, channelData[channel][frame]));
+      const intSample = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+      view.setInt16(offset, Math.round(intSample), true);
+      offset += 2;
+    }
+  }
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
+async function exportWAV() {
+  const OfflineAudioCtor = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if (!OfflineAudioCtor) {
+    alert('WAV export is not supported in this browser.');
+    return;
+  }
+  saveSong();
+  const exportEvents = collectSongExportEvents();
+  if (exportEvents.totalBeats <= 0) {
+    alert('Nothing to export. Add at least one chord beat to your song.');
+    return;
+  }
+  const button = document.getElementById('export-wav-btn');
+  const originalLabel = button?.textContent;
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Rendering WAV…';
+  }
+  try {
+    const tailSeconds = 4;
+    const renderSeconds = Math.max(1, beatsToSeconds(exportEvents.totalBeats) + tailSeconds);
+    const sampleRate = 44100;
+    const frameCount = Math.ceil(renderSeconds * sampleRate);
+    const ctx = new OfflineAudioCtor(2, frameCount, sampleRate);
+    const routing = createOfflineRouting(ctx);
+    const noiseCache = new Map();
+    applyOfflineMixSettings(routing);
+
+    const startTime = 0.05;
+    const schedulePart = (entries, synthSettings, kind) => {
+      entries.forEach(event => {
+        renderSynthVoiceOffline(
+          ctx,
+          routing,
+          frequencyFromMidi(event.midi),
+          startTime + beatOffsetToSeconds(event.beat),
+          Math.max(0.03, beatOffsetToSeconds(event.durationBeats)),
+          synthSettings,
+          kind,
+        );
+      });
+    };
+    schedulePart(exportEvents.notes.chord, song.chordSynth, 'chord');
+    schedulePart(exportEvents.notes.bass, song.bassSynth, 'bass');
+    schedulePart(exportEvents.notes.string, song.stringSynth, 'string');
+    exportEvents.drums.forEach(event => {
+      renderDrumLaneOffline(
+        ctx,
+        routing.drums.input,
+        noiseCache,
+        event.laneKey,
+        startTime + beatOffsetToSeconds(event.beat),
+      );
+    });
+
+    const renderedBuffer = await ctx.startRendering();
+    const filenameBase = sanitizeFilename(song.title || 'chordz-song');
+    downloadBlob(audioBufferToWavBlob(renderedBuffer), `${filenameBase}.wav`);
+    debugLog(`WAV export complete (${renderSeconds.toFixed(2)}s render)`);
+  } catch (error) {
+    debugLog(`WAV export failed: ${error?.message || error}`, 'error');
+    alert('WAV export failed: ' + (error?.message || 'Unknown error'));
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalLabel || '🎧 Export WAV';
+    }
+  }
+}
+
+const MIDI_TICKS_PER_QUARTER = 480;
+const MIDI_DRUM_NOTE_MAP = {
+  kick: 36,
+  snare: 38,
+  closedHat: 42,
+  openHat: 46,
+  hiTom: 50,
+  midTom: 47,
+  lowTom: 45,
+  ride: 51,
+  crash: 49,
+  rollSnare: 38,
+};
+
+function encodeVarLen(value) {
+  let buffer = value & 0x7f;
+  const result = [];
+  while ((value >>= 7)) {
+    buffer <<= 8;
+    buffer |= ((value & 0x7f) | 0x80);
+  }
+  while (true) {
+    result.push(buffer & 0xff);
+    if (buffer & 0x80) buffer >>= 8;
+    else break;
+  }
+  return result;
+}
+
+function utf8Bytes(text) {
+  if (window.TextEncoder) return Array.from(new TextEncoder().encode(text));
+  return Array.from(unescape(encodeURIComponent(text))).map(char => char.charCodeAt(0));
+}
+
+function makeMidiTrackChunk(trackBytes) {
+  const chunk = new Uint8Array(8 + trackBytes.length);
+  chunk.set([0x4d, 0x54, 0x72, 0x6b], 0);
+  const view = new DataView(chunk.buffer);
+  view.setUint32(4, trackBytes.length, false);
+  chunk.set(trackBytes, 8);
+  return chunk;
+}
+
+function makeMidiHeaderChunk(trackCount) {
+  const chunk = new Uint8Array(14);
+  chunk.set([0x4d, 0x54, 0x68, 0x64], 0);
+  const view = new DataView(chunk.buffer);
+  view.setUint32(4, 6, false);
+  view.setUint16(8, 1, false);
+  view.setUint16(10, trackCount, false);
+  view.setUint16(12, MIDI_TICKS_PER_QUARTER, false);
+  return chunk;
+}
+
+function buildMidiTrackBytes(trackName, channel, noteEvents) {
+  const bytes = [];
+  const nameBytes = utf8Bytes(trackName);
+  bytes.push(...encodeVarLen(0), 0xff, 0x03, ...encodeVarLen(nameBytes.length), ...nameBytes);
+  const midiEvents = [];
+  noteEvents.forEach(event => {
+    const startTick = Math.max(0, Math.round(event.beat * MIDI_TICKS_PER_QUARTER));
+    const durationTicks = Math.max(1, Math.round(event.durationBeats * MIDI_TICKS_PER_QUARTER));
+    const endTick = startTick + durationTicks;
+    midiEvents.push({ tick: startTick, type: 'on', note: event.midi, velocity: event.velocity || 96 });
+    midiEvents.push({ tick: endTick, type: 'off', note: event.midi, velocity: 0 });
+  });
+  midiEvents.sort((a, b) => {
+    if (a.tick !== b.tick) return a.tick - b.tick;
+    if (a.type === b.type) return a.note - b.note;
+    return a.type === 'off' ? -1 : 1;
+  });
+  let lastTick = 0;
+  midiEvents.forEach(event => {
+    const delta = event.tick - lastTick;
+    bytes.push(...encodeVarLen(delta));
+    const status = (event.type === 'on' ? 0x90 : 0x80) | (channel & 0x0f);
+    bytes.push(status, event.note & 0x7f, event.velocity & 0x7f);
+    lastTick = event.tick;
+  });
+  bytes.push(...encodeVarLen(0), 0xff, 0x2f, 0x00);
+  return new Uint8Array(bytes);
+}
+
+function buildTempoTrackBytes() {
+  const bytes = [];
+  const bpm = clampInt(song.bpm, 100, 40, 300);
+  const microsPerQuarter = Math.round(60000000 / bpm);
+  bytes.push(
+    ...encodeVarLen(0),
+    0xff, 0x51, 0x03,
+    (microsPerQuarter >> 16) & 0xff,
+    (microsPerQuarter >> 8) & 0xff,
+    microsPerQuarter & 0xff,
+  );
+  bytes.push(...encodeVarLen(0), 0xff, 0x2f, 0x00);
+  return new Uint8Array(bytes);
+}
+
+function exportMIDI() {
+  saveSong();
+  const exportEvents = collectSongExportEvents();
+  if (exportEvents.totalBeats <= 0) {
+    alert('Nothing to export. Add at least one chord beat to your song.');
+    return;
+  }
+  const chordTrack = exportEvents.notes.chord.map(event => ({ ...event, velocity: 92 }));
+  const bassTrack = exportEvents.notes.bass.map(event => ({ ...event, velocity: 102 }));
+  const stringTrack = exportEvents.notes.string.map(event => ({ ...event, velocity: 78 }));
+  const drumTrack = exportEvents.drums
+    .map(event => {
+      const midi = MIDI_DRUM_NOTE_MAP[event.laneKey];
+      if (!Number.isFinite(midi)) return null;
+      return {
+        beat: event.beat,
+        durationBeats: Math.max(event.durationBeats || 0.1, secondsToBeats(0.03)),
+        midi,
+        velocity: event.laneKey === 'kick' ? 120 : event.laneKey === 'snare' || event.laneKey === 'rollSnare' ? 108 : 96,
+      };
+    })
+    .filter(Boolean);
+
+  const chunks = [
+    makeMidiHeaderChunk(5),
+    makeMidiTrackChunk(buildTempoTrackBytes()),
+    makeMidiTrackChunk(buildMidiTrackBytes('Chords', 0, chordTrack)),
+    makeMidiTrackChunk(buildMidiTrackBytes('Bass', 1, bassTrack)),
+    makeMidiTrackChunk(buildMidiTrackBytes('Strings', 2, stringTrack)),
+    makeMidiTrackChunk(buildMidiTrackBytes('Drums', 9, drumTrack)),
+  ];
+  const filenameBase = sanitizeFilename(song.title || 'chordz-song');
+  downloadBlob(new Blob(chunks, { type: 'audio/midi' }), `${filenameBase}.mid`);
+  debugLog('MIDI export complete');
 }
 
 // =====================================================================
@@ -4171,6 +4879,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('save-btn').addEventListener('click', () => { saveSong(); showSaved(); });
   document.getElementById('export-btn').addEventListener('click', exportJSON);
+  document.getElementById('export-wav-btn').addEventListener('click', exportWAV);
+  document.getElementById('export-midi-btn').addEventListener('click', exportMIDI);
   document.getElementById('import-btn').addEventListener('click', importJSON);
   document.getElementById('new-btn').addEventListener('click', resetSong);
 
