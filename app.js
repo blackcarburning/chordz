@@ -2160,6 +2160,7 @@ function setSongPositionFromSlider(rawValue) {
 function initializePlaybackCursor() {
   const mode = song.playbackMode || 'edit';
   if (usesSongTimelineMode(mode)) {
+    if (mode === 'looping' && movePlaybackToActiveLoopTarget()) return;
     setSongPositionFromSlider(document.getElementById('song-go-to')?.value || 0);
     return;
   }
