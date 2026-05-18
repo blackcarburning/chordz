@@ -937,6 +937,14 @@ function commitSong({ rerender = false, refreshCursor = false, flushNoteBuffer =
   updatePlaybackHighlights();
 }
 
+function handleSchedulingParameterChange({ rerender = false, refreshCursor = false } = {}) {
+  commitSong({ rerender, refreshCursor, flushNoteBuffer: true });
+}
+
+function handleSynthParameterChange({ rerender = false, refreshCursor = false } = {}) {
+  commitSong({ rerender, refreshCursor });
+}
+
 function addSection(type) {
   const section = createSection(type);
   section.drumPatternId = song.drumPatterns?.[0]?.id || null;
@@ -1032,7 +1040,7 @@ function setSynthPreset(kind, presetId) {
     song.chordSound = resolved;
     song.chordSynth = createSynthSettings('chord', resolved);
   }
-  commitSong({ flushNoteBuffer: true });
+  handleSynthParameterChange();
   renderSynthRack();
 }
 
@@ -1074,7 +1082,7 @@ function updateSynthField(kind, fieldKey, value) {
   if (kind === 'bass') song.bassSound = 'custom';
   else if (kind === 'string') song.stringSound = 'custom';
   else song.chordSound = 'custom';
-  commitSong({ flushNoteBuffer: true });
+  handleSynthParameterChange();
   const presetSelect = document.getElementById(`${kind}-preset-select`);
   if (presetSelect) presetSelect.value = 'custom';
 }
@@ -1090,7 +1098,7 @@ function updateSynthWaveform(kind, fieldKey, value) {
   if (kind === 'bass') song.bassSound = 'custom';
   else if (kind === 'string') song.stringSound = 'custom';
   else song.chordSound = 'custom';
-  commitSong({ flushNoteBuffer: true });
+  handleSynthParameterChange();
   renderSynthRack();
 }
 
@@ -1136,7 +1144,7 @@ function mutateChord(sectionId, chordId, fn, { rerender = false, refreshCursor =
   const chord = section.chords.find(entry => entry.id === chordId);
   if (!chord) return;
   fn(chord);
-  commitSong({ rerender, refreshCursor, flushNoteBuffer: true });
+  handleSchedulingParameterChange({ rerender, refreshCursor });
   if (!rerender) {
     updateChordCard(sectionId, chordId);
     renderArrangementPanel(sectionId);
