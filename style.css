@@ -555,13 +555,6 @@ input[type='range'] {
   letter-spacing: 0.06em;
   color: var(--text-muted);
 }
-.section-drum-pattern-field select {
-  color: var(--text);
-  text-transform: none;
-  letter-spacing: normal;
-  font-size: 0.8rem;
-  padding: 0.22rem 0.35rem;
-}
 
 /* =====================================================================
    SYNTH RACK
@@ -1013,6 +1006,34 @@ input[type='range'] {
   letter-spacing: 0.06em;
   color: var(--text-muted);
 }
+.chord-inline-row {
+  width: 100%;
+  display: flex;
+  align-items: end;
+  gap: 0.35rem;
+}
+.chord-inline-row .repeat-field {
+  flex: 1;
+}
+.mini-action-group {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+.mini-action-btn {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  height: 1.8rem;
+  padding: 0 0.5rem;
+  font-size: 0.72rem;
+}
+.mini-action-btn:not(:disabled):hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
 .repeat-select {
   width: 100%;
   padding: 0.2rem 0.35rem;
@@ -1042,7 +1063,7 @@ input[type='range'] {
 .arrow-btn:not(:disabled):hover { background: var(--accent); color: #fff; }
 .chord-action-bar {
   display: flex;
-  justify-content: space-between;
+  align-items: center;
   width: 100%;
   gap: 0.3rem;
   margin-top: 0.1rem;
