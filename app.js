@@ -696,6 +696,10 @@ function createChord(root = DEFAULT_CHORD_ROOT, type = 'maj', drumPatternId = nu
     chordLfoPatternId,
     bassLfoPatternId,
     stringLfoPatternId,
+    bassIn: true,
+    chordsIn: true,
+    drumsIn: true,
+    stringsIn: true,
   };
 }
 
@@ -1199,6 +1203,10 @@ function normalizeChord(rawChord, fallbackDrumPatternId = null, fallbackLfoPatte
     stringLfoPatternId: typeof chord.stringLfoPatternId === 'string' && chord.stringLfoPatternId.trim()
       ? chord.stringLfoPatternId
       : legacyLfoPatternId,
+    bassIn: chord.bassIn === undefined ? true : Boolean(chord.bassIn),
+    chordsIn: chord.chordsIn === undefined ? true : Boolean(chord.chordsIn),
+    drumsIn: chord.drumsIn === undefined ? true : Boolean(chord.drumsIn),
+    stringsIn: chord.stringsIn === undefined ? true : Boolean(chord.stringsIn),
   };
 }
 
@@ -1804,6 +1812,15 @@ function updateChordLoopEnabled(sectionId, chordId, enabled) {
 function updateChordArpMode(sectionId, chordId, mode) {
   mutateChord(sectionId, chordId, chord => {
     chord.arpMode = ARP_MODES.includes(mode) ? mode : 'off';
+  });
+}
+
+function setChordPartIn(sectionId, chordId, part, enabled) {
+  const fieldMap = { bass: 'bassIn', chords: 'chordsIn', drums: 'drumsIn', strings: 'stringsIn' };
+  const field = fieldMap[part];
+  if (!field) return;
+  mutateChord(sectionId, chordId, chord => {
+    chord[field] = Boolean(enabled);
   });
 }
 
@@ -2655,7 +2672,7 @@ function collectSongExportEvents() {
         bass: getChordPartLfoPatternId(chord, 'bass', getDefaultLfoPatternId()),
         string: getChordPartLfoPatternId(chord, 'string', getDefaultLfoPatternId()),
       };
-      addHarmonicNoteEvents(events.notes.chord, {
+      if (chord.chordsIn !== false) addHarmonicNoteEvents(events.notes.chord, {
         baseBeat: absoluteChordBeat,
         rootMidi: 60 + chord.root + getSynthTranspose(song.chordSynth),
         intervals: buildChordIntervals(chord.type, chordNoteCount),
@@ -2666,7 +2683,7 @@ function collectSongExportEvents() {
         durationScale: 0.92,
         minDurationSeconds: 0.1,
       });
-      if (song.bassEnabled) {
+      if (song.bassEnabled && chord.bassIn !== false) {
         addHarmonicNoteEvents(events.notes.bass, {
           baseBeat: absoluteChordBeat,
           rootMidi: 36 + getChordBassRoot(chord) + getSynthTranspose(song.bassSynth),
@@ -2678,7 +2695,7 @@ function collectSongExportEvents() {
           minDurationSeconds: 0.09,
         });
       }
-      if (song.stringEnabled) {
+      if (song.stringEnabled && chord.stringsIn !== false) {
         addHarmonicNoteEvents(events.notes.string, {
           baseBeat: absoluteChordBeat,
           rootMidi: 48 + getChordStringRoot(chord) + getSynthTranspose(song.stringSynth),
@@ -2704,7 +2721,7 @@ function collectSongExportEvents() {
             lfoPatternId: lfoPatternIds.chord,
             lfoPatternIds: { ...lfoPatternIds },
           });
-          if (!pattern) continue;
+          if (!pattern || chord.drumsIn === false) continue;
           DRUM_LANES.forEach(lane => {
             if (!pattern.grid[lane.key]?.[step]) return;
             events.drums.push({
@@ -3460,6 +3477,7 @@ let nextNoteTime = 0;
 let currentStep = 0;
 let currentBeatStepBase = 0;
 let currentDrumPatternId = null;
+let currentChordDrumsIn = true;
 let currentLfoPatternIds = { chord: null, bass: null, string: null };
 let isBeating = false;
 let songEndedPending = false;
@@ -3893,6 +3911,7 @@ function flushScheduledNotes({
     currentStep = 0;
     currentBeatStepBase = getSectionSixteenthOffset(playbackCursor.beatInSection);
     currentDrumPatternId = null;
+    currentChordDrumsIn = true;
     currentLfoPatternIds = { chord: null, bass: null, string: null };
   }
   nextNoteTime = getAudioCtx().currentTime + 0.05;
@@ -4116,6 +4135,7 @@ function playDrumLane(key, time) {
 }
 
 function scheduleStep(step, time, patternId = currentDrumPatternId) {
+  if (!currentChordDrumsIn) return;
   const pattern = getDrumPatternById(patternId);
   if (!pattern) return;
   DRUM_LANES.forEach(lane => {
@@ -4709,9 +4729,9 @@ function scheduleMusicalBeat(time) {
   if (playbackCursor.beatInChord === 0) {
     const chordStartBeat = getChordPlaybackStartBeat(chord);
     const chordNoteCount = clampInt(chord.noteCount, chordTypeObj(chord.type).intervals.length, 1, 16);
-    playChordNotes(chord.root, chord.type, time, chord.beats || 4, chord.chordRepeat || 1, chordStartBeat, chord.arpMode || 'off', chordNoteCount);
-    if (song.bassEnabled) playBassNote(getChordBassRoot(chord), time, chord.beats || 4, chord.bassRepeat || 1, chordStartBeat);
-    if (song.stringEnabled) playStringNotes(
+    if (chord.chordsIn !== false) playChordNotes(chord.root, chord.type, time, chord.beats || 4, chord.chordRepeat || 1, chordStartBeat, chord.arpMode || 'off', chordNoteCount);
+    if (song.bassEnabled && chord.bassIn !== false) playBassNote(getChordBassRoot(chord), time, chord.beats || 4, chord.bassRepeat || 1, chordStartBeat);
+    if (song.stringEnabled && chord.stringsIn !== false) playStringNotes(
       getChordStringRoot(chord),
       chord.type,
       time,
@@ -4757,6 +4777,7 @@ function scheduler(generation = schedulerGeneration) {
       const section = song.sections[playbackCursor.sectionIndex];
       const chord = section?.chords?.[playbackCursor.chordIndex];
       currentDrumPatternId = getChordDrumPatternId(chord, getDefaultDrumPatternId());
+      currentChordDrumsIn = chord?.drumsIn !== false;
       currentLfoPatternIds = {
         chord: getChordPartLfoPatternId(chord, 'chord', getDefaultLfoPatternId()),
         bass: getChordPartLfoPatternId(chord, 'bass', getDefaultLfoPatternId()),
@@ -4785,6 +4806,7 @@ function startBeat() {
   initializePlaybackCursor();
   currentBeatStepBase = getSectionSixteenthOffset(playbackCursor.beatInSection);
   currentDrumPatternId = null;
+  currentChordDrumsIn = true;
   currentLfoPatternIds = { chord: null, bass: null, string: null };
   nextNoteTime = getAudioCtx().currentTime + 0.05;
   debugLog('Playback started');
@@ -6184,6 +6206,19 @@ function updateChordCard(sectionId, chordId) {
   if (arpModeElement) arpModeElement.value = ARP_MODES.includes(chord.arpMode) ? chord.arpMode : 'off';
   if (drumPatternElement) drumPatternElement.value = getChordDrumPatternId(chord, getDefaultDrumPatternId()) || '';
   if (lfoPatternElement) lfoPatternElement.value = getChordLfoPatternId(chord, getDefaultLfoPatternId()) || '';
+  [
+    { part: 'chords', field: 'chordsIn' },
+    { part: 'bass', field: 'bassIn' },
+    { part: 'drums', field: 'drumsIn' },
+    { part: 'strings', field: 'stringsIn' },
+  ].forEach(({ part, field }) => {
+    const btn = document.getElementById(`part-in-${part}-${chordId}`);
+    if (!btn) return;
+    const isIn = chord[field] !== false;
+    btn.classList.toggle('active', isIn);
+    btn.setAttribute('aria-pressed', String(isIn));
+    btn.title = `${part.charAt(0).toUpperCase() + part.slice(1)} ${isIn ? 'In (click to mute for this chord)' : 'Out (click to unmute for this chord)'}`;
+  });
 }
 
 function renderArrangementPanel(sectionId) {
@@ -6844,6 +6879,29 @@ function buildChordCard(chord, sectionId) {
   lfoRowWrap.className = 'chord-inline-row';
   lfoRowWrap.append(lfoPatternRow, lfoPatternActions);
 
+  const partToggleRow = document.createElement('div');
+  partToggleRow.className = 'part-toggle-row';
+  [
+    { part: 'chords', label: 'Chords', field: 'chordsIn' },
+    { part: 'bass', label: 'Bass', field: 'bassIn' },
+    { part: 'drums', label: 'Drums', field: 'drumsIn' },
+    { part: 'strings', label: 'Strings', field: 'stringsIn' },
+  ].forEach(({ part, label, field }) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.id = `part-in-${part}-${chord.id}`;
+    btn.className = 'part-in-btn' + (chord[field] !== false ? ' active' : '');
+    btn.textContent = label;
+    btn.title = `${label} ${chord[field] !== false ? 'In (click to mute for this chord)' : 'Out (click to unmute for this chord)'}`;
+    btn.setAttribute('aria-label', `Toggle ${label} for this chord`);
+    btn.setAttribute('aria-pressed', String(chord[field] !== false));
+    btn.addEventListener('click', () => {
+      const currentVal = btn.classList.contains('active');
+      setChordPartIn(sectionId, chord.id, part, !currentVal);
+    });
+    partToggleRow.appendChild(btn);
+  });
+
   const actionBar = document.createElement('div');
   actionBar.className = 'chord-action-bar';
 
@@ -6900,6 +6958,7 @@ function buildChordCard(chord, sectionId) {
     articulationRow,
     drumPatternRow,
     lfoRowWrap,
+    partToggleRow,
     actionBar,
   );
   return card;
