@@ -161,12 +161,15 @@ input[type='range'] {
 .sm-btn:not(:disabled):hover { background: var(--accent); color: #fff; }
 
 .play-btn,
+.pause-btn,
 .stop-btn {
   color: #fff;
   padding: 0.42rem 0.85rem;
 }
 .play-btn { background: var(--success); }
 .play-btn:not(:disabled):hover { background: #28b765; }
+.pause-btn { background: #8a8ca8; }
+.pause-btn:not(:disabled):hover { background: #777a98; }
 .stop-btn { background: var(--accent3); }
 .stop-btn:not(:disabled):hover { background: #c73652; }
 

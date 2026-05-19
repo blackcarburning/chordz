@@ -3765,6 +3765,7 @@ let currentDrumPatternId = null;
 let currentChordDrumsIn = true;
 let currentLfoPatternIds = { chord: null, bass: null, string: null };
 let isBeating = false;
+let transportState = 'stopped';
 let songEndedPending = false;
 let playbackCursor = {
   sequenceIndex: 0,
@@ -5053,10 +5054,7 @@ function scheduleMusicalBeat(time) {
     const delay = Math.max(0, (time - getAudioCtx().currentTime) * 1000);
     if (songEndTimeout !== null) clearTimeout(songEndTimeout);
     songEndTimeout = setTimeout(() => {
-      stopBeat();
-      stopIndicatorFlash();
-      const positionElement = document.getElementById('playback-position');
-      if (positionElement) positionElement.textContent += ' • End';
+      stopBeat({ resetPosition: true, nextState: 'ended', logMessage: 'Playback ended' });
       songEndTimeout = null;
     }, delay + 20);
   }
@@ -5097,33 +5095,75 @@ function scheduler(generation = schedulerGeneration) {
   else schedulerTimer = null;
 }
 
+function updateTransportControls() {
+  const startButton = document.getElementById('beat-start');
+  const pauseButton = document.getElementById('beat-pause');
+  const stopButton = document.getElementById('beat-stop');
+  const indicator = document.getElementById('beat-indicator');
+  if (startButton) {
+    const isPaused = transportState === 'paused' && !isBeating;
+    startButton.disabled = isBeating;
+    startButton.textContent = isPaused ? '▶ Resume' : '▶ Beat';
+    startButton.setAttribute('aria-label', isPaused ? 'Resume beat' : 'Start beat');
+  }
+  if (pauseButton) pauseButton.disabled = !isBeating;
+  if (stopButton) stopButton.disabled = !isBeating && transportState !== 'paused';
+  if (indicator) indicator.classList.toggle('playing', isBeating);
+}
+
+function resetPlaybackPositionToStart() {
+  const mode = song.playbackMode || 'edit';
+  if (usesSongTimelineMode(mode)) {
+    const slider = document.getElementById('song-go-to');
+    if (slider) slider.value = '0';
+    setSongPositionFromSlider(0);
+  } else {
+    initializePlaybackCursor();
+  }
+}
+
+function haltPlaybackAudio() {
+  isBeating = false;
+  flushScheduledNotes();
+  stopIndicatorFlash();
+}
+
 function startBeat() {
-  if (isBeating) stopBeat();
+  if (isBeating) return;
+  const resumeFromPause = transportState === 'paused';
   isBeating = true;
+  transportState = 'playing';
   songEndedPending = false;
   schedulerGeneration += 1;
-  currentStep = 0;
-  initializePlaybackCursor();
+  if (!resumeFromPause) initializePlaybackCursor();
+  currentStep = getSectionSixteenthOffset(playbackCursor.beatInSection);
   currentBeatStepBase = getSectionSixteenthOffset(playbackCursor.beatInSection);
   currentDrumPatternId = null;
   currentChordDrumsIn = true;
   currentLfoPatternIds = { chord: null, bass: null, string: null };
   nextNoteTime = getAudioCtx().currentTime + 0.05;
-  debugLog('Playback started');
+  debugLog(resumeFromPause ? 'Playback resumed' : 'Playback started');
   scheduler(schedulerGeneration);
-  document.getElementById('beat-start').disabled = true;
-  document.getElementById('beat-stop').disabled = false;
-  document.getElementById('beat-indicator').classList.add('playing');
+  startIndicatorFlash();
+  updateTransportControls();
   updatePlaybackHighlights();
 }
 
-function stopBeat() {
-  isBeating = false;
-  flushScheduledNotes();
-  debugLog('Playback stopped');
-  document.getElementById('beat-start').disabled = false;
-  document.getElementById('beat-stop').disabled = true;
-  document.getElementById('beat-indicator').classList.remove('playing');
+function pauseBeat() {
+  if (!isBeating) return;
+  haltPlaybackAudio();
+  transportState = 'paused';
+  debugLog('Playback paused');
+  updateTransportControls();
+  updatePlaybackHighlights();
+}
+
+function stopBeat({ resetPosition = true, nextState = 'stopped', logMessage = 'Playback stopped' } = {}) {
+  haltPlaybackAudio();
+  if (resetPosition) resetPlaybackPositionToStart();
+  transportState = nextState;
+  debugLog(logMessage);
+  updateTransportControls();
   lastHighlightedChordId = null;
   updatePlaybackHighlights();
 }
@@ -7653,11 +7693,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('beat-start').addEventListener('click', () => {
     startBeat();
-    startIndicatorFlash();
+  });
+  document.getElementById('beat-pause').addEventListener('click', () => {
+    pauseBeat();
   });
   document.getElementById('beat-stop').addEventListener('click', () => {
     stopBeat();
-    stopIndicatorFlash();
   });
 
   document.getElementById('transpose-down').addEventListener('click', () => transposeSong(-1));
@@ -7683,6 +7724,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   startAutosaveTimer();
+  updateTransportControls();
 
   document.getElementById('add-section-btn').addEventListener('click', () => {
     const type = document.getElementById('section-type-select').value;
