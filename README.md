@@ -31,6 +31,7 @@ Replaces the old preset beat with a fully editable pattern-based drum sequencer:
 * **16th-note grid** (16 steps = 1 bar). Steps loop automatically for section lengths longer than one bar.
 * **Click any step button** to toggle it on or off. Beat-group boundaries (every 4 steps) are visually marked.
 * **10 nameable pattern slots** – The song stores 10 independent patterns. Switch between them with the **Edit pattern** dropdown in the sequencer panel, then rename using the **Pattern name** field. The first three patterns come with starter grooves (Rock Beat, Funk, Ballad); the remaining seven are blank.
+* **Per-lane sound selectors** – Every drum lane includes a compact sound dropdown with 10 lane-specific synth variants. Selections are stored per pattern, so different patterns can use different lane sounds.
 * **Per-section drum pattern assignment** – Each song section has a **Drum pattern** dropdown in its options row. This chooses which of the 10 patterns plays when that section is active.
 * **Arranger integration** – Song-mode playback through the arranger uses the pattern assigned to the currently playing section; repeated sections use the same pattern each time.
 * **Contained layout** – The sequencer is rendered in its own panel above the synth controls, with horizontal scrolling kept inside the grid area so the page layout stays stable.

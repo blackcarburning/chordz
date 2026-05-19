@@ -86,6 +86,120 @@ const DRUM_LANES = [
   { key: 'lowTom',    label: 'Low Tom' },
   { key: 'ride',      label: 'Ride' },
 ];
+const DRUM_LANE_DEFAULT_VARIANTS = Object.freeze({
+  kick: Object.freeze({ oscType: 'sine', startFreq: 120, endFreq: 40, pitchTime: 0.12, peak: 1.05, attack: 0.004, decay: 0.35, stop: 0.35 }),
+  snare: Object.freeze({
+    noiseDuration: 0.16, noiseCutoff: 1600, noisePeak: 0.65, noiseAttack: 0.002, noiseDecay: 0.14,
+    toneType: 'triangle', toneStartFreq: 220, toneEndFreq: 110, tonePitchTime: 0.08, tonePeak: 0.36, toneAttack: 0.002, toneDecay: 0.09, toneStop: 0.09,
+  }),
+  closedHat: Object.freeze({ noiseDuration: 0.05, cutoff: 7000, peak: 0.2, attack: 0.001, decay: 0.045 }),
+  openHat: Object.freeze({ noiseDuration: 0.45, cutoff: 5000, peak: 0.28, attack: 0.002, decay: 0.4 }),
+  hiTom: Object.freeze({ oscType: 'sine', startFreq: 260, endFreq: 150, pitchTime: 0.15, peak: 0.75, attack: 0.003, decay: 0.22, stop: 0.25 }),
+  midTom: Object.freeze({ oscType: 'sine', startFreq: 190, endFreq: 100, pitchTime: 0.18, peak: 0.75, attack: 0.003, decay: 0.28, stop: 0.32 }),
+  lowTom: Object.freeze({ oscType: 'sine', startFreq: 130, endFreq: 65, pitchTime: 0.22, peak: 0.8, attack: 0.004, decay: 0.34, stop: 0.38 }),
+  ride: Object.freeze({
+    oscType: 'square', partialFrequencies: [560, 845, 1174, 1523, 1780],
+    partialGain: 0.04, peak: 0.18, attack: 0.002, decay: 0.28, partialDuration: 0.3,
+  }),
+});
+const DRUM_LANE_SOUND_CHOICES = Object.freeze({
+  kick: Object.freeze([
+    Object.freeze({ id: 'kickClassic', label: 'Classic (Default)', variant: Object.freeze({}) }),
+    Object.freeze({ id: 'kickDeep', label: 'Deep', variant: Object.freeze({ startFreq: 108, endFreq: 34, pitchTime: 0.18, peak: 1.12, decay: 0.42 }) }),
+    Object.freeze({ id: 'kickTight', label: 'Tight', variant: Object.freeze({ startFreq: 135, endFreq: 55, pitchTime: 0.08, peak: 0.95, decay: 0.22 }) }),
+    Object.freeze({ id: 'kickPunch', label: 'Punch', variant: Object.freeze({ oscType: 'triangle', startFreq: 150, endFreq: 48, peak: 1.18, attack: 0.002, decay: 0.28 }) }),
+    Object.freeze({ id: 'kickSoft', label: 'Soft', variant: Object.freeze({ startFreq: 112, endFreq: 44, peak: 0.82, attack: 0.006, decay: 0.31 }) }),
+    Object.freeze({ id: 'kickClick', label: 'Click', variant: Object.freeze({ oscType: 'square', startFreq: 180, endFreq: 65, pitchTime: 0.05, peak: 0.88, decay: 0.18, stop: 0.2 }) }),
+    Object.freeze({ id: 'kickBoom', label: 'Boom', variant: Object.freeze({ oscType: 'triangle', startFreq: 100, endFreq: 30, pitchTime: 0.22, peak: 1.1, decay: 0.5, stop: 0.5 }) }),
+    Object.freeze({ id: 'kickThump', label: 'Thump', variant: Object.freeze({ startFreq: 126, endFreq: 42, pitchTime: 0.14, peak: 1.03, attack: 0.003, decay: 0.3 }) }),
+    Object.freeze({ id: 'kickSub', label: 'Sub', variant: Object.freeze({ startFreq: 92, endFreq: 28, pitchTime: 0.24, peak: 1.05, decay: 0.56, stop: 0.56 }) }),
+    Object.freeze({ id: 'kickElectro', label: 'Electro', variant: Object.freeze({ oscType: 'triangle', startFreq: 165, endFreq: 58, pitchTime: 0.1, peak: 0.93, decay: 0.24 }) }),
+  ]),
+  snare: Object.freeze([
+    Object.freeze({ id: 'snareClassic', label: 'Classic (Default)', variant: Object.freeze({}) }),
+    Object.freeze({ id: 'snareTight', label: 'Tight', variant: Object.freeze({ noiseDuration: 0.12, noiseCutoff: 2100, noisePeak: 0.52, noiseDecay: 0.1, toneStartFreq: 260, toneEndFreq: 140, tonePeak: 0.24, toneDecay: 0.065 }) }),
+    Object.freeze({ id: 'snareBody', label: 'Body', variant: Object.freeze({ noiseCutoff: 1200, noisePeak: 0.58, toneType: 'sine', toneStartFreq: 180, toneEndFreq: 90, tonePeak: 0.46, toneDecay: 0.12, toneStop: 0.12 }) }),
+    Object.freeze({ id: 'snareCrisp', label: 'Crisp', variant: Object.freeze({ noiseDuration: 0.11, noiseCutoff: 2800, noisePeak: 0.72, noiseDecay: 0.085, tonePeak: 0.22 }) }),
+    Object.freeze({ id: 'snareFat', label: 'Fat', variant: Object.freeze({ noiseDuration: 0.2, noiseCutoff: 1100, noisePeak: 0.66, noiseDecay: 0.18, toneType: 'triangle', toneStartFreq: 170, toneEndFreq: 80, tonePeak: 0.52, toneDecay: 0.16, toneStop: 0.16 }) }),
+    Object.freeze({ id: 'snareBrush', label: 'Brush', variant: Object.freeze({ noiseDuration: 0.22, noiseCutoff: 2300, noisePeak: 0.48, noiseAttack: 0.004, noiseDecay: 0.2, tonePeak: 0.17, toneDecay: 0.07 }) }),
+    Object.freeze({ id: 'snareSnap', label: 'Snap', variant: Object.freeze({ noiseDuration: 0.09, noiseCutoff: 3200, noisePeak: 0.78, noiseDecay: 0.07, toneStartFreq: 280, toneEndFreq: 155, tonePitchTime: 0.055, tonePeak: 0.2, toneDecay: 0.055, toneStop: 0.06 }) }),
+    Object.freeze({ id: 'snareRing', label: 'Ring', variant: Object.freeze({ noiseCutoff: 1500, noisePeak: 0.5, toneType: 'sine', toneStartFreq: 240, toneEndFreq: 118, tonePitchTime: 0.11, tonePeak: 0.48, toneDecay: 0.2, toneStop: 0.2 }) }),
+    Object.freeze({ id: 'snareNoise', label: 'Noise', variant: Object.freeze({ noiseDuration: 0.24, noiseCutoff: 1900, noisePeak: 0.8, noiseDecay: 0.22, tonePeak: 0.12, toneDecay: 0.05, toneStop: 0.06 }) }),
+    Object.freeze({ id: 'snareElectronic', label: 'Electronic', variant: Object.freeze({ noiseDuration: 0.09, noiseCutoff: 2600, noisePeak: 0.34, noiseDecay: 0.08, toneType: 'square', toneStartFreq: 310, toneEndFreq: 170, tonePitchTime: 0.06, tonePeak: 0.4, toneDecay: 0.11, toneStop: 0.11 }) }),
+  ]),
+  closedHat: Object.freeze([
+    Object.freeze({ id: 'closedHatClassic', label: 'Classic (Default)', variant: Object.freeze({}) }),
+    Object.freeze({ id: 'closedHatTight', label: 'Tight', variant: Object.freeze({ noiseDuration: 0.03, cutoff: 8400, peak: 0.17, decay: 0.028 }) }),
+    Object.freeze({ id: 'closedHatBright', label: 'Bright', variant: Object.freeze({ cutoff: 9600, peak: 0.25, decay: 0.04 }) }),
+    Object.freeze({ id: 'closedHatDusty', label: 'Dusty', variant: Object.freeze({ noiseDuration: 0.07, cutoff: 5600, peak: 0.19, attack: 0.002, decay: 0.055 }) }),
+    Object.freeze({ id: 'closedHatSoft', label: 'Soft', variant: Object.freeze({ cutoff: 6500, peak: 0.13, attack: 0.002, decay: 0.06 }) }),
+    Object.freeze({ id: 'closedHatChick', label: 'Chick', variant: Object.freeze({ noiseDuration: 0.028, cutoff: 9000, peak: 0.22, decay: 0.02 }) }),
+    Object.freeze({ id: 'closedHatThin', label: 'Thin', variant: Object.freeze({ noiseDuration: 0.038, cutoff: 10500, peak: 0.18, decay: 0.032 }) }),
+    Object.freeze({ id: 'closedHatGrit', label: 'Grit', variant: Object.freeze({ noiseDuration: 0.065, cutoff: 6200, peak: 0.24, decay: 0.07 }) }),
+    Object.freeze({ id: 'closedHatMetal', label: 'Metal', variant: Object.freeze({ noiseDuration: 0.055, cutoff: 8800, peak: 0.23, decay: 0.05 }) }),
+    Object.freeze({ id: 'closedHatDigital', label: 'Digital', variant: Object.freeze({ noiseDuration: 0.04, cutoff: 11000, peak: 0.2, attack: 0.0007, decay: 0.03 }) }),
+  ]),
+  openHat: Object.freeze([
+    Object.freeze({ id: 'openHatClassic', label: 'Classic (Default)', variant: Object.freeze({}) }),
+    Object.freeze({ id: 'openHatShort', label: 'Short', variant: Object.freeze({ noiseDuration: 0.24, cutoff: 5800, peak: 0.22, decay: 0.2 }) }),
+    Object.freeze({ id: 'openHatWide', label: 'Wide', variant: Object.freeze({ noiseDuration: 0.62, cutoff: 5600, peak: 0.31, decay: 0.58 }) }),
+    Object.freeze({ id: 'openHatBright', label: 'Bright', variant: Object.freeze({ noiseDuration: 0.42, cutoff: 7600, peak: 0.28, decay: 0.36 }) }),
+    Object.freeze({ id: 'openHatWashed', label: 'Washed', variant: Object.freeze({ noiseDuration: 0.74, cutoff: 4800, peak: 0.33, attack: 0.003, decay: 0.7 }) }),
+    Object.freeze({ id: 'openHatSoft', label: 'Soft', variant: Object.freeze({ noiseDuration: 0.38, cutoff: 4300, peak: 0.2, attack: 0.003, decay: 0.34 }) }),
+    Object.freeze({ id: 'openHatAiry', label: 'Airy', variant: Object.freeze({ noiseDuration: 0.56, cutoff: 8600, peak: 0.24, decay: 0.52 }) }),
+    Object.freeze({ id: 'openHatTrash', label: 'Trash', variant: Object.freeze({ noiseDuration: 0.52, cutoff: 5200, peak: 0.36, decay: 0.46 }) }),
+    Object.freeze({ id: 'openHatTight', label: 'Tight', variant: Object.freeze({ noiseDuration: 0.3, cutoff: 6800, peak: 0.26, decay: 0.24 }) }),
+    Object.freeze({ id: 'openHatDigital', label: 'Digital', variant: Object.freeze({ noiseDuration: 0.34, cutoff: 9800, peak: 0.21, attack: 0.001, decay: 0.28 }) }),
+  ]),
+  hiTom: Object.freeze([
+    Object.freeze({ id: 'hiTomClassic', label: 'Classic (Default)', variant: Object.freeze({}) }),
+    Object.freeze({ id: 'hiTomPunch', label: 'Punch', variant: Object.freeze({ oscType: 'triangle', startFreq: 300, endFreq: 175, pitchTime: 0.12, peak: 0.84, decay: 0.2 }) }),
+    Object.freeze({ id: 'hiTomRound', label: 'Round', variant: Object.freeze({ startFreq: 245, endFreq: 135, pitchTime: 0.18, peak: 0.72, decay: 0.27, stop: 0.28 }) }),
+    Object.freeze({ id: 'hiTomShort', label: 'Short', variant: Object.freeze({ startFreq: 280, endFreq: 170, pitchTime: 0.1, peak: 0.71, decay: 0.16, stop: 0.18 }) }),
+    Object.freeze({ id: 'hiTomDeep', label: 'Deep', variant: Object.freeze({ startFreq: 220, endFreq: 120, pitchTime: 0.2, peak: 0.78, decay: 0.31, stop: 0.32 }) }),
+    Object.freeze({ id: 'hiTomHard', label: 'Hard', variant: Object.freeze({ oscType: 'square', startFreq: 320, endFreq: 185, peak: 0.58, attack: 0.002, decay: 0.14, stop: 0.16 }) }),
+    Object.freeze({ id: 'hiTomSoft', label: 'Soft', variant: Object.freeze({ startFreq: 250, endFreq: 150, peak: 0.62, attack: 0.006, decay: 0.24 }) }),
+    Object.freeze({ id: 'hiTomRetro', label: 'Retro', variant: Object.freeze({ oscType: 'triangle', startFreq: 290, endFreq: 140, pitchTime: 0.16, peak: 0.68, decay: 0.21 }) }),
+    Object.freeze({ id: 'hiTomTone', label: 'Tone', variant: Object.freeze({ oscType: 'sine', startFreq: 340, endFreq: 200, pitchTime: 0.09, peak: 0.76, decay: 0.18 }) }),
+    Object.freeze({ id: 'hiTomElectro', label: 'Electro', variant: Object.freeze({ oscType: 'square', startFreq: 360, endFreq: 210, pitchTime: 0.07, peak: 0.52, decay: 0.12, stop: 0.14 }) }),
+  ]),
+  midTom: Object.freeze([
+    Object.freeze({ id: 'midTomClassic', label: 'Classic (Default)', variant: Object.freeze({}) }),
+    Object.freeze({ id: 'midTomPunch', label: 'Punch', variant: Object.freeze({ oscType: 'triangle', startFreq: 220, endFreq: 120, pitchTime: 0.14, peak: 0.82, decay: 0.24 }) }),
+    Object.freeze({ id: 'midTomRound', label: 'Round', variant: Object.freeze({ startFreq: 175, endFreq: 92, pitchTime: 0.22, peak: 0.73, decay: 0.32, stop: 0.36 }) }),
+    Object.freeze({ id: 'midTomShort', label: 'Short', variant: Object.freeze({ startFreq: 210, endFreq: 118, pitchTime: 0.12, peak: 0.68, decay: 0.18, stop: 0.22 }) }),
+    Object.freeze({ id: 'midTomDeep', label: 'Deep', variant: Object.freeze({ startFreq: 160, endFreq: 78, pitchTime: 0.24, peak: 0.76, decay: 0.38, stop: 0.42 }) }),
+    Object.freeze({ id: 'midTomHard', label: 'Hard', variant: Object.freeze({ oscType: 'square', startFreq: 250, endFreq: 130, pitchTime: 0.11, peak: 0.56, decay: 0.16, stop: 0.19 }) }),
+    Object.freeze({ id: 'midTomSoft', label: 'Soft', variant: Object.freeze({ startFreq: 185, endFreq: 96, peak: 0.66, attack: 0.006, decay: 0.3 }) }),
+    Object.freeze({ id: 'midTomRetro', label: 'Retro', variant: Object.freeze({ oscType: 'triangle', startFreq: 230, endFreq: 106, pitchTime: 0.18, peak: 0.7, decay: 0.28 }) }),
+    Object.freeze({ id: 'midTomTone', label: 'Tone', variant: Object.freeze({ oscType: 'sine', startFreq: 260, endFreq: 140, pitchTime: 0.1, peak: 0.74, decay: 0.21 }) }),
+    Object.freeze({ id: 'midTomElectro', label: 'Electro', variant: Object.freeze({ oscType: 'square', startFreq: 280, endFreq: 160, pitchTime: 0.08, peak: 0.5, decay: 0.14, stop: 0.16 }) }),
+  ]),
+  lowTom: Object.freeze([
+    Object.freeze({ id: 'lowTomClassic', label: 'Classic (Default)', variant: Object.freeze({}) }),
+    Object.freeze({ id: 'lowTomPunch', label: 'Punch', variant: Object.freeze({ oscType: 'triangle', startFreq: 150, endFreq: 78, pitchTime: 0.18, peak: 0.88, decay: 0.3 }) }),
+    Object.freeze({ id: 'lowTomRound', label: 'Round', variant: Object.freeze({ startFreq: 120, endFreq: 58, pitchTime: 0.26, peak: 0.8, decay: 0.42, stop: 0.46 }) }),
+    Object.freeze({ id: 'lowTomShort', label: 'Short', variant: Object.freeze({ startFreq: 140, endFreq: 80, pitchTime: 0.14, peak: 0.74, decay: 0.22, stop: 0.24 }) }),
+    Object.freeze({ id: 'lowTomSub', label: 'Sub', variant: Object.freeze({ startFreq: 105, endFreq: 45, pitchTime: 0.3, peak: 0.86, decay: 0.54, stop: 0.58 }) }),
+    Object.freeze({ id: 'lowTomHard', label: 'Hard', variant: Object.freeze({ oscType: 'square', startFreq: 170, endFreq: 90, pitchTime: 0.12, peak: 0.58, decay: 0.18, stop: 0.2 }) }),
+    Object.freeze({ id: 'lowTomSoft', label: 'Soft', variant: Object.freeze({ startFreq: 125, endFreq: 66, peak: 0.68, attack: 0.006, decay: 0.36 }) }),
+    Object.freeze({ id: 'lowTomRetro', label: 'Retro', variant: Object.freeze({ oscType: 'triangle', startFreq: 160, endFreq: 70, pitchTime: 0.22, peak: 0.76, decay: 0.34 }) }),
+    Object.freeze({ id: 'lowTomTone', label: 'Tone', variant: Object.freeze({ oscType: 'sine', startFreq: 185, endFreq: 98, pitchTime: 0.12, peak: 0.74, decay: 0.26 }) }),
+    Object.freeze({ id: 'lowTomElectro', label: 'Electro', variant: Object.freeze({ oscType: 'square', startFreq: 200, endFreq: 110, pitchTime: 0.09, peak: 0.52, decay: 0.16, stop: 0.18 }) }),
+  ]),
+  ride: Object.freeze([
+    Object.freeze({ id: 'rideClassic', label: 'Classic (Default)', variant: Object.freeze({}) }),
+    Object.freeze({ id: 'rideBright', label: 'Bright', variant: Object.freeze({ partialFrequencies: [650, 950, 1330, 1700, 2040], partialGain: 0.045, peak: 0.2, decay: 0.3 }) }),
+    Object.freeze({ id: 'rideDry', label: 'Dry', variant: Object.freeze({ partialFrequencies: [520, 760, 1030, 1320, 1600], partialGain: 0.036, peak: 0.15, decay: 0.22 }) }),
+    Object.freeze({ id: 'rideBell', label: 'Bell', variant: Object.freeze({ partialFrequencies: [820, 1210, 1650, 2140, 2610], partialGain: 0.038, peak: 0.22, decay: 0.26 }) }),
+    Object.freeze({ id: 'rideWash', label: 'Wash', variant: Object.freeze({ partialFrequencies: [500, 730, 980, 1230, 1490], partialGain: 0.043, peak: 0.19, decay: 0.42, partialDuration: 0.46 }) }),
+    Object.freeze({ id: 'rideSoft', label: 'Soft', variant: Object.freeze({ partialFrequencies: [540, 800, 1100, 1460, 1760], partialGain: 0.03, peak: 0.13, attack: 0.003, decay: 0.24 }) }),
+    Object.freeze({ id: 'rideMetal', label: 'Metal', variant: Object.freeze({ oscType: 'square', partialFrequencies: [710, 1010, 1390, 1810, 2200], partialGain: 0.05, peak: 0.21, decay: 0.31 }) }),
+    Object.freeze({ id: 'rideThin', label: 'Thin', variant: Object.freeze({ partialFrequencies: [640, 920, 1270, 1620, 1940], partialGain: 0.032, peak: 0.16, decay: 0.2 }) }),
+    Object.freeze({ id: 'rideDark', label: 'Dark', variant: Object.freeze({ partialFrequencies: [430, 620, 860, 1110, 1360], partialGain: 0.048, peak: 0.2, decay: 0.36, partialDuration: 0.42 }) }),
+    Object.freeze({ id: 'rideDigital', label: 'Digital', variant: Object.freeze({ partialFrequencies: [900, 1320, 1860, 2410, 2960], partialGain: 0.03, peak: 0.17, attack: 0.0015, decay: 0.19 }) }),
+  ]),
+});
 
 // Pre-defined grid patterns for the first 3 slots
 const DRUM_PRESET_GRIDS = [
@@ -709,6 +823,41 @@ function emptyDrumGrid() {
   return grid;
 }
 
+function getDrumLaneSoundChoices(laneKey) {
+  return Array.isArray(DRUM_LANE_SOUND_CHOICES[laneKey]) ? DRUM_LANE_SOUND_CHOICES[laneKey] : [];
+}
+
+function getDefaultDrumLaneSoundId(laneKey) {
+  return getDrumLaneSoundChoices(laneKey)[0]?.id || null;
+}
+
+function normalizeDrumPatternLaneSounds(rawLaneSounds) {
+  const source = rawLaneSounds && typeof rawLaneSounds === 'object' ? rawLaneSounds : {};
+  const laneSounds = {};
+  DRUM_LANES.forEach(lane => {
+    const choices = getDrumLaneSoundChoices(lane.key);
+    const defaultSoundId = choices[0]?.id || null;
+    const rawSoundId = source[lane.key];
+    laneSounds[lane.key] = choices.some(choice => choice.id === rawSoundId)
+      ? rawSoundId
+      : defaultSoundId;
+  });
+  return laneSounds;
+}
+
+function getDrumLaneSoundId(pattern, laneKey) {
+  if (!pattern || !laneKey) return getDefaultDrumLaneSoundId(laneKey);
+  const soundId = pattern.laneSounds?.[laneKey];
+  return normalizeDrumPatternLaneSounds({ [laneKey]: soundId })[laneKey];
+}
+
+function resolveDrumSoundVariant(laneKey, soundId) {
+  const laneDefaults = DRUM_LANE_DEFAULT_VARIANTS[laneKey] || {};
+  const choices = getDrumLaneSoundChoices(laneKey);
+  const resolvedChoice = choices.find(choice => choice.id === soundId) || choices[0];
+  return Object.assign({}, laneDefaults, resolvedChoice?.variant || {});
+}
+
 function createDefaultDrumPattern(index) {
   const presetGrid = DRUM_PRESET_GRIDS[index];
   const grid = {};
@@ -719,6 +868,7 @@ function createDefaultDrumPattern(index) {
     id: makeId(),
     name: DRUM_PRESET_NAMES[index] || `Pattern ${index + 1}`,
     grid,
+    laneSounds: normalizeDrumPatternLaneSounds(null),
   };
 }
 
@@ -755,6 +905,7 @@ function normalizeDrumPatterns(rawPatterns) {
         id: typeof raw.id === 'string' && raw.id.trim() ? raw.id : makeId(),
         name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : `Pattern ${i + 1}`,
         grid,
+        laneSounds: normalizeDrumPatternLaneSounds(raw.laneSounds),
       });
     } else {
       result.push(createDefaultDrumPattern(i));
@@ -1147,6 +1298,7 @@ function cloneDrumPatternForClipboard(pattern) {
   return deepClone({
     name: pattern.name,
     grid: pattern.grid,
+    laneSounds: normalizeDrumPatternLaneSounds(pattern.laneSounds),
   });
 }
 
@@ -2111,6 +2263,15 @@ function updateDrumPatternName(patternId, name) {
   refreshDrumPatternOptionLabels(pattern.id, name);
 }
 
+function setDrumLaneSound(patternId, laneKey, soundId) {
+  const pattern = getDrumPatternById(patternId);
+  if (!pattern || !DRUM_LANES.some(lane => lane.key === laneKey)) return;
+  const resolvedSoundId = normalizeDrumPatternLaneSounds({ [laneKey]: soundId })[laneKey];
+  if (!resolvedSoundId || getDrumLaneSoundId(pattern, laneKey) === resolvedSoundId) return;
+  pattern.laneSounds = Object.assign({}, normalizeDrumPatternLaneSounds(pattern.laneSounds), { [laneKey]: resolvedSoundId });
+  handleSynthParameterChange();
+}
+
 function selectEditDrumPattern(patternId) {
   editingDrumPatternId = getValidDrumPatternId(patternId);
   renderDrumSequencer();
@@ -2275,9 +2436,11 @@ function pasteDrumPattern(patternId = editingDrumPatternId) {
     id: pattern.id,
     name: copiedDrumPatternConfig.name,
     grid: copiedDrumPatternConfig.grid,
+    laneSounds: copiedDrumPatternConfig.laneSounds,
   }])[0];
   pattern.name = normalized.name;
   pattern.grid = normalized.grid;
+  pattern.laneSounds = normalized.laneSounds;
   editingDrumPatternId = pattern.id;
   refreshDrumPatternOptionLabels(pattern.id, pattern.name);
   handleSchedulingParameterChange();
@@ -2346,7 +2509,8 @@ function addDrumPatternFromCurrent(sourcePatternId = editingDrumPatternId) {
   DRUM_LANES.forEach(lane => {
     grid[lane.key] = source ? source.grid[lane.key].slice() : Array(16).fill(0);
   });
-  const newPattern = { id: makeId(), name, grid };
+  const laneSounds = normalizeDrumPatternLaneSounds(source?.laneSounds);
+  const newPattern = { id: makeId(), name, grid, laneSounds };
   song.drumPatterns = [...(song.drumPatterns || []), newPattern];
   editingDrumPatternId = newPattern.id;
   commitSong();
@@ -2844,6 +3008,7 @@ function collectSongExportEvents() {
             events.drums.push({
               beat,
               laneKey: lane.key,
+              laneSoundId: getDrumLaneSoundId(pattern, lane.key),
               durationBeats: 0.125,
             });
           });
@@ -3130,124 +3295,125 @@ function renderSynthVoiceOffline(ctx, routing, freq, time, duration, synthSettin
   if (lfo) lfo.stop(noteEnd + 0.02);
 }
 
-function renderDrumLaneOffline(ctx, drumsInput, noiseCache, laneKey, time) {
+function renderDrumLaneOffline(ctx, drumsInput, noiseCache, laneKey, time, soundId = null) {
   if (laneKey === 'rollSnare') laneKey = 'snare';
+  const variant = resolveDrumSoundVariant(laneKey, soundId);
   switch (laneKey) {
     case 'kick': {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
       gain.connect(drumsInput);
-      osc.frequency.setValueAtTime(120, time);
-      osc.frequency.exponentialRampToValueAtTime(40, time + 0.12);
+      osc.type = variant.oscType || 'sine';
+      osc.frequency.setValueAtTime(clampNumber(variant.startFreq, 120, 40, 260), time);
+      osc.frequency.exponentialRampToValueAtTime(clampNumber(variant.endFreq, 40, 20, 180), time + clampNumber(variant.pitchTime, 0.12, 0.02, 0.6));
       gain.gain.setValueAtTime(0.0001, time);
-      gain.gain.linearRampToValueAtTime(1.05, time + 0.004);
-      gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.35);
+      gain.gain.linearRampToValueAtTime(clampNumber(variant.peak, 1.05, 0.05, 1.4), time + clampNumber(variant.attack, 0.004, 0.001, 0.02));
+      gain.gain.exponentialRampToValueAtTime(0.0001, time + clampNumber(variant.decay, 0.35, 0.04, 1));
       osc.start(time);
-      osc.stop(time + 0.35);
+      osc.stop(time + clampNumber(variant.stop, 0.35, 0.05, 1.1));
       break;
     }
     case 'snare': {
       const noise = ctx.createBufferSource();
-      noise.buffer = createNoiseBufferForContext(ctx, noiseCache, 0.16);
+      noise.buffer = createNoiseBufferForContext(ctx, noiseCache, clampNumber(variant.noiseDuration, 0.16, 0.02, 0.7));
       const noiseFilter = ctx.createBiquadFilter();
       noiseFilter.type = 'highpass';
-      noiseFilter.frequency.value = 1600;
+      noiseFilter.frequency.value = clampNumber(variant.noiseCutoff, 1600, 300, 14000);
       const noiseGain = ctx.createGain();
       noise.connect(noiseFilter);
       noiseFilter.connect(noiseGain);
       noiseGain.connect(drumsInput);
       noiseGain.gain.setValueAtTime(0.0001, time);
-      noiseGain.gain.linearRampToValueAtTime(0.65, time + 0.002);
-      noiseGain.gain.exponentialRampToValueAtTime(0.0001, time + 0.14);
+      noiseGain.gain.linearRampToValueAtTime(clampNumber(variant.noisePeak, 0.65, 0.04, 0.95), time + clampNumber(variant.noiseAttack, 0.002, 0.001, 0.03));
+      noiseGain.gain.exponentialRampToValueAtTime(0.0001, time + clampNumber(variant.noiseDecay, 0.14, 0.02, 0.8));
       noise.start(time);
-      noise.stop(time + 0.16);
+      noise.stop(time + clampNumber(variant.noiseDuration, 0.16, 0.02, 0.7));
 
       const osc = ctx.createOscillator();
       const oscGain = ctx.createGain();
-      osc.type = 'triangle';
+      osc.type = variant.toneType || 'triangle';
       osc.connect(oscGain);
       oscGain.connect(drumsInput);
-      osc.frequency.setValueAtTime(220, time);
-      osc.frequency.exponentialRampToValueAtTime(110, time + 0.08);
+      osc.frequency.setValueAtTime(clampNumber(variant.toneStartFreq, 220, 40, 900), time);
+      osc.frequency.exponentialRampToValueAtTime(clampNumber(variant.toneEndFreq, 110, 30, 700), time + clampNumber(variant.tonePitchTime, 0.08, 0.02, 0.5));
       oscGain.gain.setValueAtTime(0.0001, time);
-      oscGain.gain.linearRampToValueAtTime(0.36, time + 0.002);
-      oscGain.gain.exponentialRampToValueAtTime(0.0001, time + 0.09);
+      oscGain.gain.linearRampToValueAtTime(clampNumber(variant.tonePeak, 0.36, 0.02, 0.8), time + clampNumber(variant.toneAttack, 0.002, 0.001, 0.03));
+      oscGain.gain.exponentialRampToValueAtTime(0.0001, time + clampNumber(variant.toneDecay, 0.09, 0.02, 0.8));
       osc.start(time);
-      osc.stop(time + 0.09);
+      osc.stop(time + clampNumber(variant.toneStop, variant.toneDecay, 0.02, 0.8));
       break;
     }
     case 'closedHat': {
       const noise = ctx.createBufferSource();
-      noise.buffer = createNoiseBufferForContext(ctx, noiseCache, 0.05);
+      noise.buffer = createNoiseBufferForContext(ctx, noiseCache, clampNumber(variant.noiseDuration, 0.05, 0.01, 0.8));
       const filter = ctx.createBiquadFilter();
       filter.type = 'highpass';
-      filter.frequency.value = 7000;
+      filter.frequency.value = clampNumber(variant.cutoff, 7000, 600, 18000);
       const gain = ctx.createGain();
       noise.connect(filter);
       filter.connect(gain);
       gain.connect(drumsInput);
       gain.gain.setValueAtTime(0.0001, time);
-      gain.gain.linearRampToValueAtTime(0.2, time + 0.001);
-      gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.045);
+      gain.gain.linearRampToValueAtTime(clampNumber(variant.peak, 0.2, 0.01, 0.8), time + clampNumber(variant.attack, 0.001, 0.001, 0.03));
+      gain.gain.exponentialRampToValueAtTime(0.0001, time + clampNumber(variant.decay, 0.045, 0.01, 1));
       noise.start(time);
-      noise.stop(time + 0.05);
+      noise.stop(time + clampNumber(variant.noiseDuration, 0.05, 0.01, 0.8));
       break;
     }
     case 'openHat': {
       const noise = ctx.createBufferSource();
-      noise.buffer = createNoiseBufferForContext(ctx, noiseCache, 0.45);
+      noise.buffer = createNoiseBufferForContext(ctx, noiseCache, clampNumber(variant.noiseDuration, 0.45, 0.02, 0.8));
       const filter = ctx.createBiquadFilter();
       filter.type = 'highpass';
-      filter.frequency.value = 5000;
+      filter.frequency.value = clampNumber(variant.cutoff, 5000, 600, 18000);
       const gain = ctx.createGain();
       noise.connect(filter);
       filter.connect(gain);
       gain.connect(drumsInput);
       gain.gain.setValueAtTime(0.0001, time);
-      gain.gain.linearRampToValueAtTime(0.28, time + 0.002);
-      gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.4);
+      gain.gain.linearRampToValueAtTime(clampNumber(variant.peak, 0.28, 0.02, 0.9), time + clampNumber(variant.attack, 0.002, 0.001, 0.03));
+      gain.gain.exponentialRampToValueAtTime(0.0001, time + clampNumber(variant.decay, 0.4, 0.01, 1));
       noise.start(time);
-      noise.stop(time + 0.45);
+      noise.stop(time + clampNumber(variant.noiseDuration, 0.45, 0.02, 0.8));
       break;
     }
     case 'hiTom':
     case 'midTom':
     case 'lowTom': {
-      const config = laneKey === 'hiTom'
-        ? { startFreq: 260, endFreq: 150, endTime: 0.15, peak: 0.75, fade: 0.22, stop: 0.25 }
-        : laneKey === 'midTom'
-          ? { startFreq: 190, endFreq: 100, endTime: 0.18, peak: 0.75, fade: 0.28, stop: 0.32 }
-          : { startFreq: 130, endFreq: 65, endTime: 0.22, peak: 0.8, fade: 0.34, stop: 0.38 };
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
       gain.connect(drumsInput);
-      osc.frequency.setValueAtTime(config.startFreq, time);
-      osc.frequency.exponentialRampToValueAtTime(config.endFreq, time + config.endTime);
+      osc.type = variant.oscType || 'sine';
+      osc.frequency.setValueAtTime(clampNumber(variant.startFreq, 200, 50, 1200), time);
+      osc.frequency.exponentialRampToValueAtTime(clampNumber(variant.endFreq, 100, 40, 800), time + clampNumber(variant.pitchTime, 0.2, 0.01, 0.8));
       gain.gain.setValueAtTime(0.0001, time);
-      gain.gain.linearRampToValueAtTime(config.peak, time + 0.003);
-      gain.gain.exponentialRampToValueAtTime(0.0001, time + config.fade);
+      gain.gain.linearRampToValueAtTime(clampNumber(variant.peak, 0.75, 0.02, 1.2), time + clampNumber(variant.attack, 0.003, 0.001, 0.03));
+      gain.gain.exponentialRampToValueAtTime(0.0001, time + clampNumber(variant.decay, 0.28, 0.02, 1));
       osc.start(time);
-      osc.stop(time + config.stop);
+      osc.stop(time + clampNumber(variant.stop, 0.32, 0.02, 1.1));
       break;
     }
     case 'ride': {
       const masterGain = ctx.createGain();
       masterGain.connect(drumsInput);
       masterGain.gain.setValueAtTime(0.0001, time);
-      masterGain.gain.linearRampToValueAtTime(0.18, time + 0.002);
-      masterGain.gain.exponentialRampToValueAtTime(0.0001, time + 0.28);
-      [560, 845, 1174, 1523, 1780].forEach(freq => {
+      masterGain.gain.linearRampToValueAtTime(clampNumber(variant.peak, 0.18, 0.01, 0.9), time + clampNumber(variant.attack, 0.002, 0.001, 0.03));
+      masterGain.gain.exponentialRampToValueAtTime(0.0001, time + clampNumber(variant.decay, 0.28, 0.02, 1));
+      const frequencies = Array.isArray(variant.partialFrequencies) && variant.partialFrequencies.length
+        ? variant.partialFrequencies
+        : [560, 845, 1174, 1523, 1780];
+      frequencies.forEach(freq => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
-        gain.gain.value = 0.04;
-        osc.type = 'square';
+        gain.gain.value = clampNumber(variant.partialGain, 0.04, 0.005, 0.2);
+        osc.type = variant.oscType || 'square';
         osc.frequency.value = freq;
         osc.connect(gain);
         gain.connect(masterGain);
         osc.start(time);
-        osc.stop(time + 0.3);
+        osc.stop(time + clampNumber(variant.partialDuration, 0.3, 0.02, 1.2));
       });
       break;
     }
@@ -3430,6 +3596,7 @@ async function exportWAV() {
         noiseCache,
         event.laneKey,
         startTime + beatOffsetToSeconds(event.beat),
+        event.laneSoundId,
       );
     });
 
@@ -4068,186 +4235,201 @@ function createNoiseBuffer(duration) {
   return buffer;
 }
 
-function playKick(time) {
+function playKick(time, soundId = null) {
   const ctx = getAudioCtx();
   const dest = audioRouting?.drums?.input || ctx.destination;
+  const variant = resolveDrumSoundVariant('kick', soundId);
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
   osc.connect(gain);
   gain.connect(dest);
-  osc.frequency.setValueAtTime(120, time);
-  osc.frequency.exponentialRampToValueAtTime(40, time + 0.12);
+  osc.type = variant.oscType || 'sine';
+  osc.frequency.setValueAtTime(clampNumber(variant.startFreq, 120, 40, 260), time);
+  osc.frequency.exponentialRampToValueAtTime(clampNumber(variant.endFreq, 40, 20, 180), time + clampNumber(variant.pitchTime, 0.12, 0.02, 0.6));
   gain.gain.setValueAtTime(0.0001, time);
-  gain.gain.linearRampToValueAtTime(1.05, time + 0.004);
-  gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.35);
+  gain.gain.linearRampToValueAtTime(clampNumber(variant.peak, 1.05, 0.05, 1.4), time + clampNumber(variant.attack, 0.004, 0.001, 0.02));
+  gain.gain.exponentialRampToValueAtTime(0.0001, time + clampNumber(variant.decay, 0.35, 0.04, 1));
   registerAudioNodeEntry([osc], [osc, gain], 'drum');
   osc.start(time);
-  osc.stop(time + 0.35);
+  osc.stop(time + clampNumber(variant.stop, 0.35, 0.05, 1.1));
 }
 
-function playSnare(time) {
+function playSnare(time, soundId = null) {
   const ctx = getAudioCtx();
   const dest = audioRouting?.drums?.input || ctx.destination;
+  const variant = resolveDrumSoundVariant('snare', soundId);
   const noise = ctx.createBufferSource();
-  noise.buffer = createNoiseBuffer(0.16);
+  noise.buffer = createNoiseBuffer(clampNumber(variant.noiseDuration, 0.16, 0.02, 0.7));
   const noiseFilter = ctx.createBiquadFilter();
   noiseFilter.type = 'highpass';
-  noiseFilter.frequency.value = 1600;
+  noiseFilter.frequency.value = clampNumber(variant.noiseCutoff, 1600, 300, 14000);
   const noiseGain = ctx.createGain();
   noise.connect(noiseFilter);
   noiseFilter.connect(noiseGain);
   noiseGain.connect(dest);
   noiseGain.gain.setValueAtTime(0.0001, time);
-  noiseGain.gain.linearRampToValueAtTime(0.65, time + 0.002);
-  noiseGain.gain.exponentialRampToValueAtTime(0.0001, time + 0.14);
+  noiseGain.gain.linearRampToValueAtTime(clampNumber(variant.noisePeak, 0.65, 0.04, 0.95), time + clampNumber(variant.noiseAttack, 0.002, 0.001, 0.03));
+  noiseGain.gain.exponentialRampToValueAtTime(0.0001, time + clampNumber(variant.noiseDecay, 0.14, 0.02, 0.8));
   registerAudioNodeEntry([noise], [noise, noiseFilter, noiseGain], 'drum');
   noise.start(time);
-  noise.stop(time + 0.16);
+  noise.stop(time + clampNumber(variant.noiseDuration, 0.16, 0.02, 0.7));
 
   const osc = ctx.createOscillator();
   const oscGain = ctx.createGain();
-  osc.type = 'triangle';
+  osc.type = variant.toneType || 'triangle';
   osc.connect(oscGain);
   oscGain.connect(dest);
-  osc.frequency.setValueAtTime(220, time);
-  osc.frequency.exponentialRampToValueAtTime(110, time + 0.08);
+  osc.frequency.setValueAtTime(clampNumber(variant.toneStartFreq, 220, 40, 900), time);
+  osc.frequency.exponentialRampToValueAtTime(clampNumber(variant.toneEndFreq, 110, 30, 700), time + clampNumber(variant.tonePitchTime, 0.08, 0.02, 0.5));
   oscGain.gain.setValueAtTime(0.0001, time);
-  oscGain.gain.linearRampToValueAtTime(0.36, time + 0.002);
-  oscGain.gain.exponentialRampToValueAtTime(0.0001, time + 0.09);
+  oscGain.gain.linearRampToValueAtTime(clampNumber(variant.tonePeak, 0.36, 0.02, 0.8), time + clampNumber(variant.toneAttack, 0.002, 0.001, 0.03));
+  oscGain.gain.exponentialRampToValueAtTime(0.0001, time + clampNumber(variant.toneDecay, 0.09, 0.02, 0.8));
   registerAudioNodeEntry([osc], [osc, oscGain], 'drum');
   osc.start(time);
-  osc.stop(time + 0.09);
+  osc.stop(time + clampNumber(variant.toneStop, variant.toneDecay, 0.02, 0.8));
 }
 
-function playClosedHat(time) {
+function playClosedHat(time, soundId = null) {
   const ctx = getAudioCtx();
   const dest = audioRouting?.drums?.input || ctx.destination;
+  const variant = resolveDrumSoundVariant('closedHat', soundId);
   const noise = ctx.createBufferSource();
-  noise.buffer = createNoiseBuffer(0.05);
+  noise.buffer = createNoiseBuffer(clampNumber(variant.noiseDuration, 0.05, 0.01, 0.8));
   const filter = ctx.createBiquadFilter();
   filter.type = 'highpass';
-  filter.frequency.value = 7000;
+  filter.frequency.value = clampNumber(variant.cutoff, 7000, 600, 18000);
   const gain = ctx.createGain();
   noise.connect(filter);
   filter.connect(gain);
   gain.connect(dest);
   gain.gain.setValueAtTime(0.0001, time);
-  gain.gain.linearRampToValueAtTime(0.2, time + 0.001);
-  gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.045);
+  gain.gain.linearRampToValueAtTime(clampNumber(variant.peak, 0.2, 0.01, 0.8), time + clampNumber(variant.attack, 0.001, 0.001, 0.03));
+  gain.gain.exponentialRampToValueAtTime(0.0001, time + clampNumber(variant.decay, 0.045, 0.01, 1));
   registerAudioNodeEntry([noise], [noise, filter, gain], 'drum');
   noise.start(time);
-  noise.stop(time + 0.05);
+  noise.stop(time + clampNumber(variant.noiseDuration, 0.05, 0.01, 0.8));
 }
 
 function playHiHat(time) { playClosedHat(time); }
 
-function playOpenHat(time) {
+function playOpenHat(time, soundId = null) {
   const ctx = getAudioCtx();
   const dest = audioRouting?.drums?.input || ctx.destination;
+  const variant = resolveDrumSoundVariant('openHat', soundId);
   const noise = ctx.createBufferSource();
-  noise.buffer = createNoiseBuffer(0.45);
+  noise.buffer = createNoiseBuffer(clampNumber(variant.noiseDuration, 0.45, 0.02, 0.8));
   const filter = ctx.createBiquadFilter();
   filter.type = 'highpass';
-  filter.frequency.value = 5000;
+  filter.frequency.value = clampNumber(variant.cutoff, 5000, 600, 18000);
   const gain = ctx.createGain();
   noise.connect(filter);
   filter.connect(gain);
   gain.connect(dest);
   gain.gain.setValueAtTime(0.0001, time);
-  gain.gain.linearRampToValueAtTime(0.28, time + 0.002);
-  gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.4);
+  gain.gain.linearRampToValueAtTime(clampNumber(variant.peak, 0.28, 0.02, 0.9), time + clampNumber(variant.attack, 0.002, 0.001, 0.03));
+  gain.gain.exponentialRampToValueAtTime(0.0001, time + clampNumber(variant.decay, 0.4, 0.01, 1));
   registerAudioNodeEntry([noise], [noise, filter, gain], 'drum');
   noise.start(time);
-  noise.stop(time + 0.45);
+  noise.stop(time + clampNumber(variant.noiseDuration, 0.45, 0.02, 0.8));
 }
 
-function playHighTom(time) {
+function playHighTom(time, soundId = null) {
   const ctx = getAudioCtx();
   const dest = audioRouting?.drums?.input || ctx.destination;
+  const variant = resolveDrumSoundVariant('hiTom', soundId);
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
   osc.connect(gain);
   gain.connect(dest);
-  osc.frequency.setValueAtTime(260, time);
-  osc.frequency.exponentialRampToValueAtTime(150, time + 0.15);
+  osc.type = variant.oscType || 'sine';
+  osc.frequency.setValueAtTime(clampNumber(variant.startFreq, 260, 50, 1200), time);
+  osc.frequency.exponentialRampToValueAtTime(clampNumber(variant.endFreq, 150, 40, 800), time + clampNumber(variant.pitchTime, 0.15, 0.01, 0.8));
   gain.gain.setValueAtTime(0.0001, time);
-  gain.gain.linearRampToValueAtTime(0.75, time + 0.003);
-  gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.22);
+  gain.gain.linearRampToValueAtTime(clampNumber(variant.peak, 0.75, 0.02, 1.2), time + clampNumber(variant.attack, 0.003, 0.001, 0.03));
+  gain.gain.exponentialRampToValueAtTime(0.0001, time + clampNumber(variant.decay, 0.22, 0.02, 1));
   registerAudioNodeEntry([osc], [osc, gain], 'drum');
   osc.start(time);
-  osc.stop(time + 0.25);
+  osc.stop(time + clampNumber(variant.stop, 0.25, 0.02, 1.1));
 }
 
-function playMidTom(time) {
+function playMidTom(time, soundId = null) {
   const ctx = getAudioCtx();
   const dest = audioRouting?.drums?.input || ctx.destination;
+  const variant = resolveDrumSoundVariant('midTom', soundId);
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
   osc.connect(gain);
   gain.connect(dest);
-  osc.frequency.setValueAtTime(190, time);
-  osc.frequency.exponentialRampToValueAtTime(100, time + 0.18);
+  osc.type = variant.oscType || 'sine';
+  osc.frequency.setValueAtTime(clampNumber(variant.startFreq, 190, 50, 1200), time);
+  osc.frequency.exponentialRampToValueAtTime(clampNumber(variant.endFreq, 100, 40, 800), time + clampNumber(variant.pitchTime, 0.18, 0.01, 0.8));
   gain.gain.setValueAtTime(0.0001, time);
-  gain.gain.linearRampToValueAtTime(0.75, time + 0.003);
-  gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.28);
+  gain.gain.linearRampToValueAtTime(clampNumber(variant.peak, 0.75, 0.02, 1.2), time + clampNumber(variant.attack, 0.003, 0.001, 0.03));
+  gain.gain.exponentialRampToValueAtTime(0.0001, time + clampNumber(variant.decay, 0.28, 0.02, 1));
   registerAudioNodeEntry([osc], [osc, gain], 'drum');
   osc.start(time);
-  osc.stop(time + 0.32);
+  osc.stop(time + clampNumber(variant.stop, 0.32, 0.02, 1.1));
 }
 
-function playLowTom(time) {
+function playLowTom(time, soundId = null) {
   const ctx = getAudioCtx();
   const dest = audioRouting?.drums?.input || ctx.destination;
+  const variant = resolveDrumSoundVariant('lowTom', soundId);
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
   osc.connect(gain);
   gain.connect(dest);
-  osc.frequency.setValueAtTime(130, time);
-  osc.frequency.exponentialRampToValueAtTime(65, time + 0.22);
+  osc.type = variant.oscType || 'sine';
+  osc.frequency.setValueAtTime(clampNumber(variant.startFreq, 130, 50, 1200), time);
+  osc.frequency.exponentialRampToValueAtTime(clampNumber(variant.endFreq, 65, 40, 800), time + clampNumber(variant.pitchTime, 0.22, 0.01, 0.8));
   gain.gain.setValueAtTime(0.0001, time);
-  gain.gain.linearRampToValueAtTime(0.8, time + 0.004);
-  gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.34);
+  gain.gain.linearRampToValueAtTime(clampNumber(variant.peak, 0.8, 0.02, 1.2), time + clampNumber(variant.attack, 0.004, 0.001, 0.03));
+  gain.gain.exponentialRampToValueAtTime(0.0001, time + clampNumber(variant.decay, 0.34, 0.02, 1));
   registerAudioNodeEntry([osc], [osc, gain], 'drum');
   osc.start(time);
-  osc.stop(time + 0.38);
+  osc.stop(time + clampNumber(variant.stop, 0.38, 0.02, 1.1));
 }
 
-function playRide(time) {
+function playRide(time, soundId = null) {
   const ctx = getAudioCtx();
   const dest = audioRouting?.drums?.input || ctx.destination;
+  const variant = resolveDrumSoundVariant('ride', soundId);
   const masterGain = ctx.createGain();
   masterGain.connect(dest);
   masterGain.gain.setValueAtTime(0.0001, time);
-  masterGain.gain.linearRampToValueAtTime(0.18, time + 0.002);
-  masterGain.gain.exponentialRampToValueAtTime(0.0001, time + 0.28);
+  masterGain.gain.linearRampToValueAtTime(clampNumber(variant.peak, 0.18, 0.01, 0.9), time + clampNumber(variant.attack, 0.002, 0.001, 0.03));
+  masterGain.gain.exponentialRampToValueAtTime(0.0001, time + clampNumber(variant.decay, 0.28, 0.02, 1));
   const rideOscillators = [];
   const rideNodes = [masterGain];
-  [560, 845, 1174, 1523, 1780].forEach(freq => {
+  const frequencies = Array.isArray(variant.partialFrequencies) && variant.partialFrequencies.length
+    ? variant.partialFrequencies
+    : [560, 845, 1174, 1523, 1780];
+  frequencies.forEach(freq => {
     const osc = ctx.createOscillator();
     const g = ctx.createGain();
-    g.gain.value = 0.04;
-    osc.type = 'square';
+    g.gain.value = clampNumber(variant.partialGain, 0.04, 0.005, 0.2);
+    osc.type = variant.oscType || 'square';
     osc.frequency.value = freq;
     osc.connect(g);
     g.connect(masterGain);
     rideOscillators.push(osc);
     rideNodes.push(osc, g);
     osc.start(time);
-    osc.stop(time + 0.3);
+    osc.stop(time + clampNumber(variant.partialDuration, 0.3, 0.02, 1.2));
   });
   registerAudioNodeEntry(rideOscillators, rideNodes, 'drum');
 }
 
-function playDrumLane(key, time) {
+function playDrumLane(key, time, soundId = null) {
   switch (key) {
-    case 'kick':      playKick(time); break;
-    case 'snare':     playSnare(time); break;
-    case 'closedHat': playClosedHat(time); break;
-    case 'openHat':   playOpenHat(time); break;
-    case 'hiTom':     playHighTom(time); break;
-    case 'midTom':    playMidTom(time); break;
-    case 'lowTom':    playLowTom(time); break;
-    case 'ride':      playRide(time); break;
+    case 'kick':      playKick(time, soundId); break;
+    case 'snare':     playSnare(time, soundId); break;
+    case 'closedHat': playClosedHat(time, soundId); break;
+    case 'openHat':   playOpenHat(time, soundId); break;
+    case 'hiTom':     playHighTom(time, soundId); break;
+    case 'midTom':    playMidTom(time, soundId); break;
+    case 'lowTom':    playLowTom(time, soundId); break;
+    case 'ride':      playRide(time, soundId); break;
   }
 }
 
@@ -4256,7 +4438,7 @@ function scheduleStep(step, time, patternId = currentDrumPatternId) {
   const pattern = getDrumPatternById(patternId);
   if (!pattern) return;
   DRUM_LANES.forEach(lane => {
-    if (pattern.grid[lane.key]?.[step]) playDrumLane(lane.key, time);
+    if (pattern.grid[lane.key]?.[step]) playDrumLane(lane.key, time, getDrumLaneSoundId(pattern, lane.key));
   });
 }
 
@@ -5054,6 +5236,9 @@ function renderDrumSequencer() {
   const spacer = document.createElement('span');
   spacer.className = 'drum-seq-lane-label';
   numbersRow.appendChild(spacer);
+  const soundSpacer = document.createElement('span');
+  soundSpacer.className = 'drum-seq-lane-sound-spacer';
+  numbersRow.appendChild(soundSpacer);
   const stepsWrap = document.createElement('div');
   stepsWrap.className = 'drum-seq-steps';
   for (let s = 0; s < 16; s++) {
@@ -5073,6 +5258,19 @@ function renderDrumSequencer() {
     const laneLabel = document.createElement('span');
     laneLabel.className = 'drum-seq-lane-label';
     laneLabel.textContent = lane.label;
+
+    const laneSoundSelect = document.createElement('select');
+    laneSoundSelect.className = 'drum-seq-lane-sound-select';
+    laneSoundSelect.setAttribute('aria-label', `${lane.label} sound`);
+    const selectedSoundId = getDrumLaneSoundId(pattern, lane.key);
+    getDrumLaneSoundChoices(lane.key).forEach(choice => {
+      const option = document.createElement('option');
+      option.value = choice.id;
+      option.textContent = choice.label;
+      if (choice.id === selectedSoundId) option.selected = true;
+      laneSoundSelect.appendChild(option);
+    });
+    laneSoundSelect.addEventListener('change', () => setDrumLaneSound(editingDrumPatternId, lane.key, laneSoundSelect.value));
 
     const steps = document.createElement('div');
     steps.className = 'drum-seq-steps';
@@ -5098,7 +5296,7 @@ function renderDrumSequencer() {
       steps.appendChild(btn);
     }
 
-    row.append(laneLabel, steps);
+    row.append(laneLabel, laneSoundSelect, steps);
     grid.appendChild(row);
   });
 

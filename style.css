@@ -535,6 +535,20 @@ input[type='range'] {
   padding-right: 0.4rem;
   flex-shrink: 0;
 }
+.drum-seq-lane-sound-spacer {
+  width: 116px;
+  min-width: 116px;
+  flex-shrink: 0;
+}
+.drum-seq-lane-sound-select {
+  width: 116px;
+  min-width: 116px;
+  font-size: 0.72rem;
+  padding: 0.2rem 0.3rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
 .drum-seq-steps {
   display: flex;
   gap: 3px;
