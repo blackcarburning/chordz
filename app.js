@@ -342,6 +342,19 @@ const DRUM_DISTORTION_MODELS = [
   { value: 'tube', label: 'Tube / asym' },
 ];
 
+const DRUM_FILTER_TYPES = [
+  { value: 'lowpass', label: 'Low-pass' },
+  { value: 'highpass', label: 'High-pass' },
+  { value: 'bandpass', label: 'Band-pass' },
+];
+
+const DRUM_FILTER_SLOPE_OPTIONS = [
+  { value: 12, label: '12 dB/oct' },
+  { value: 24, label: '24 dB/oct' },
+  { value: 48, label: '48 dB/oct' },
+  { value: 96, label: '96 dB/oct' },
+];
+
 const FILTER_POLE_OPTIONS = [
   { value: 1, label: '1-pole / 6 dB' },
   { value: 2, label: '2-pole / 12 dB' },
@@ -516,6 +529,19 @@ function normalizeDrumDistortionModel(value, fallback = 'softClip') {
   return valid.includes(value) ? value : fallback;
 }
 
+function normalizeDrumFilterType(value, fallback = 'lowpass') {
+  const valid = DRUM_FILTER_TYPES.map(option => option.value);
+  return valid.includes(value) ? value : fallback;
+}
+
+function normalizeDrumFilterSlope(value, fallback = 12) {
+  const parsed = clampInt(value, fallback, 12, 96);
+  if (parsed >= 96) return 96;
+  if (parsed >= 48) return 48;
+  if (parsed >= 24) return 24;
+  return 12;
+}
+
 function normalizeSynthSettings(kind, rawSynth, legacyPreset) {
   const synth = rawSynth || {};
   const presetId = resolvePresetId(kind, synth.preset || legacyPreset);
@@ -619,6 +645,14 @@ function createDefaultSong() {
       distortionEnabled: false,
       distortionModel: 'softClip',
       distortionDrive: 0,
+      filterEnabled: false,
+      filterType: 'lowpass',
+      filterCutoff: 20000,
+      filterResonance: 0.7,
+      filterSlope: 12,
+      filterLfoEnabled: false,
+      filterLfoPatternId: defaultLfoPatternId,
+      filterLfoDepth: 0,
       reverbMix: 0,
       reverbSize: 0.35,
       reverbDecay: 0.45,
@@ -938,6 +972,10 @@ function getValidLfoPatternId(patternId, fallback = getDefaultLfoPatternId()) {
   return fallback;
 }
 
+function getValidDrumFilterLfoPatternId(patternId, fallback = getDefaultLfoPatternId()) {
+  return getValidLfoPatternId(patternId, fallback);
+}
+
 function getDrumPatternById(patternId) {
   const patterns = song.drumPatterns || [];
   if (!patterns.length) return null;
@@ -950,6 +988,12 @@ function getLfoPatternById(patternId) {
   if (!patterns.length) return null;
   const resolvedId = getValidLfoPatternId(patternId, patterns[0].id);
   return patterns.find(pattern => pattern.id === resolvedId) || patterns[0];
+}
+
+function getDrumFilterLfoPattern() {
+  const fallbackId = getDefaultLfoPatternId();
+  const patternId = getValidDrumFilterLfoPatternId(song.drumFx?.filterLfoPatternId, fallbackId);
+  return getLfoPatternById(patternId || fallbackId);
 }
 
 function getChordDrumPatternId(chord, fallback = getDefaultDrumPatternId()) {
@@ -1001,7 +1045,7 @@ function refreshAllChordDrumDropdowns() {
 
 function refreshAllChordLfoDropdowns() {
   const patterns = song.lfoPatterns || [];
-  ['lfo-pattern-chord-', 'lfo-pattern-bass-', 'lfo-pattern-string-'].forEach(prefix => {
+  ['lfo-pattern-chord-', 'lfo-pattern-bass-', 'lfo-pattern-string-', 'drum-filter-lfo-pattern-select'].forEach(prefix => {
     document.querySelectorAll(`select[id^="${prefix}"]`).forEach(select => {
       const currentValue = select.value;
       select.innerHTML = '';
@@ -1269,6 +1313,20 @@ function normalizeSong(rawSong) {
         : Boolean(parsed.drumFx.distortionEnabled),
       distortionModel: normalizeDrumDistortionModel(parsed.drumFx?.distortionModel, base.drumFx.distortionModel),
       distortionDrive: clampNumber(parsed.drumFx?.distortionDrive, base.drumFx.distortionDrive, 0, 1),
+      filterEnabled: parsed.drumFx?.filterEnabled === undefined
+        ? base.drumFx.filterEnabled
+        : Boolean(parsed.drumFx.filterEnabled),
+      filterType: normalizeDrumFilterType(parsed.drumFx?.filterType, base.drumFx.filterType),
+      filterCutoff: clampNumber(parsed.drumFx?.filterCutoff, base.drumFx.filterCutoff, 20, 20000),
+      filterResonance: clampNumber(parsed.drumFx?.filterResonance, base.drumFx.filterResonance, 0.2, 12),
+      filterSlope: normalizeDrumFilterSlope(parsed.drumFx?.filterSlope, base.drumFx.filterSlope),
+      filterLfoEnabled: parsed.drumFx?.filterLfoEnabled === undefined
+        ? base.drumFx.filterLfoEnabled
+        : Boolean(parsed.drumFx.filterLfoEnabled),
+      filterLfoPatternId: validLfoPatternIds.has(parsed.drumFx?.filterLfoPatternId)
+        ? parsed.drumFx.filterLfoPatternId
+        : defaultLfoPatternId,
+      filterLfoDepth: clampNumber(parsed.drumFx?.filterLfoDepth, base.drumFx.filterLfoDepth, 0, 1),
       reverbMix: clampNumber(parsed.drumFx?.reverbMix, base.drumFx.reverbMix, 0, 1),
       reverbSize: clampNumber(parsed.drumFx?.reverbSize, base.drumFx.reverbSize, 0, 1),
       reverbDecay: clampNumber(parsed.drumFx?.reverbDecay, base.drumFx.reverbDecay, 0, 1),
@@ -1883,6 +1941,22 @@ function updateDrumFxField(field, value) {
     song.drumFx.distortionModel = normalizeDrumDistortionModel(value, song.drumFx.distortionModel);
   } else if (field === 'distortionDrive') {
     song.drumFx.distortionDrive = clampNumber(value, song.drumFx.distortionDrive, 0, 1);
+  } else if (field === 'filterEnabled') {
+    song.drumFx.filterEnabled = Boolean(value);
+  } else if (field === 'filterType') {
+    song.drumFx.filterType = normalizeDrumFilterType(value, song.drumFx.filterType);
+  } else if (field === 'filterCutoff') {
+    song.drumFx.filterCutoff = clampNumber(value, song.drumFx.filterCutoff, 20, 20000);
+  } else if (field === 'filterResonance') {
+    song.drumFx.filterResonance = clampNumber(value, song.drumFx.filterResonance, 0.2, 12);
+  } else if (field === 'filterSlope') {
+    song.drumFx.filterSlope = normalizeDrumFilterSlope(value, song.drumFx.filterSlope);
+  } else if (field === 'filterLfoEnabled') {
+    song.drumFx.filterLfoEnabled = Boolean(value);
+  } else if (field === 'filterLfoPatternId') {
+    song.drumFx.filterLfoPatternId = getValidDrumFilterLfoPatternId(value, getDefaultLfoPatternId());
+  } else if (field === 'filterLfoDepth') {
+    song.drumFx.filterLfoDepth = clampNumber(value, song.drumFx.filterLfoDepth, 0, 1);
   } else if (field === 'reverbMix') {
     song.drumFx.reverbMix = clampNumber(value, song.drumFx.reverbMix, 0, 1);
   } else if (field === 'reverbSize') {
@@ -2716,13 +2790,19 @@ function createOfflineRouting(ctx) {
   const drumsGain = ctx.createGain();
   const drumsDistortionInput = ctx.createGain();
   const drumsDistortion = ctx.createWaveShaper();
+  const drumsFilterInput = ctx.createGain();
+  const drumsFilterBypass = ctx.createGain();
+  const drumsFilterOutput = ctx.createGain();
   const drumsReverb = ctx.createConvolver();
   const drumsDry = ctx.createGain();
   const drumsWet = ctx.createGain();
   drumsGain.connect(drumsDistortionInput);
   drumsDistortionInput.connect(drumsDistortion);
-  drumsDistortion.connect(drumsDry);
-  drumsDistortion.connect(drumsReverb);
+  drumsDistortion.connect(drumsFilterInput);
+  drumsFilterInput.connect(drumsFilterBypass);
+  drumsFilterBypass.connect(drumsFilterOutput);
+  drumsFilterOutput.connect(drumsDry);
+  drumsFilterOutput.connect(drumsReverb);
   drumsReverb.connect(drumsWet);
   drumsDry.connect(master);
   drumsWet.connect(master);
@@ -2735,6 +2815,11 @@ function createOfflineRouting(ctx) {
       input: drumsGain,
       distortionInput: drumsDistortionInput,
       distortion: drumsDistortion,
+      filterInput: drumsFilterInput,
+      filterBypass: drumsFilterBypass,
+      filterOutput: drumsFilterOutput,
+      filterStages: [],
+      filterConfigKey: '',
       reverb: drumsReverb,
       dry: drumsDry,
       wet: drumsWet,
@@ -2751,6 +2836,11 @@ function applyDrumFxSettingsToRouting(drumsRouting, ctx, smooth = true) {
   const distortionEnabled = drumFx.distortionEnabled === undefined ? false : Boolean(drumFx.distortionEnabled);
   const distortionDrive = clampNumber(drumFx.distortionDrive, 0, 0, 1);
   const effectiveDrive = distortionEnabled ? distortionDrive : 0;
+  const filterEnabled = Boolean(drumFx.filterEnabled);
+  const filterType = normalizeDrumFilterType(drumFx.filterType, 'lowpass');
+  const filterSlope = normalizeDrumFilterSlope(drumFx.filterSlope, 12);
+  const filterCutoff = getDrumFilterCutoffAtTransportStep(currentStep);
+  const filterResonance = clampNumber(drumFx.filterResonance, 0.7, 0.2, 12);
   const reverbMix = clampNumber(drumFx.reverbMix, 0, 0, 1);
   const reverbSize = clampNumber(drumFx.reverbSize, 0.35, 0, 1);
   const reverbDecay = clampNumber(drumFx.reverbDecay, 0.45, 0, 1);
@@ -2761,8 +2851,20 @@ function applyDrumFxSettingsToRouting(drumsRouting, ctx, smooth = true) {
 
   if (drumsRouting.output?.gain) setParam(drumsRouting.output.gain, clampNumber(mixer.drumsVolume, 0.9, 0, 1));
   if (drumsRouting.distortionInput?.gain) setParam(drumsRouting.distortionInput.gain, 1 + effectiveDrive * 2.2);
+  if (drumsRouting.filterBypass?.gain) setParam(drumsRouting.filterBypass.gain, filterEnabled ? 0 : 1);
   if (drumsRouting.dry?.gain) setParam(drumsRouting.dry.gain, Math.max(0, 1 - reverbMix));
   if (drumsRouting.wet?.gain) setParam(drumsRouting.wet.gain, reverbMix);
+
+  rebuildDrumFilterChain(drumsRouting, ctx, filterEnabled, filterType, filterSlope);
+  if (drumsRouting.filterStages?.length) {
+    const lastFilterIndex = drumsRouting.filterStages.length - 1;
+    drumsRouting.filterStages.forEach((stage, index) => {
+      stage.type = filterType;
+      const stageQ = index === lastFilterIndex ? filterResonance : Math.max(0.2, filterResonance * 0.5);
+      setParam(stage.frequency, filterCutoff);
+      setParam(stage.Q, stageQ);
+    });
+  }
 
   if (drumsRouting.distortion) {
     drumsRouting.distortion.curve = effectiveDrive > 0.001 ? getDrumDistortionCurve(model, effectiveDrive) : null;
@@ -3161,7 +3263,29 @@ async function exportWAV() {
         });
       });
     };
+    const scheduleDrumFilterLfo = (steps) => {
+      if (!Array.isArray(steps) || !steps.length) return;
+      if (!routing.drums?.filterStages?.length) return;
+      const drumFx = song.drumFx || {};
+      if (!Boolean(drumFx.filterEnabled) || !Boolean(drumFx.filterLfoEnabled)) return;
+      const depth = clampNumber(drumFx.filterLfoDepth, 0, 0, 1);
+      if (depth <= 0.0001) return;
+      const bpm = clampInt(song?.bpm, 100, 40, 300);
+      const stepSeconds = (60 / bpm) / 4;
+      const pattern = getDrumFilterLfoPattern();
+      const smoothing = clampNumber(pattern?.smoothing, 0.08, 0, 1);
+      const rampSeconds = Math.max(0.002, Math.min(stepSeconds * 0.95, 0.004 + smoothing * stepSeconds));
+      steps.forEach(step => {
+        const time = startTime + beatOffsetToSeconds(step.beat);
+        const cutoff = getDrumFilterCutoffAtTransportStep(step.transportStep);
+        routing.drums.filterStages.forEach(stage => {
+          stage.frequency.setValueAtTime(stage.frequency.value, time);
+          stage.frequency.linearRampToValueAtTime(cutoff, time + rampSeconds);
+        });
+      });
+    };
     scheduleLfo(exportEvents.lfoSteps);
+    scheduleDrumFilterLfo(exportEvents.lfoSteps);
     schedulePart(exportEvents.notes.chord, song.chordSynth, 'chord');
     schedulePart(exportEvents.notes.bass, song.bassSynth, 'bass');
     schedulePart(exportEvents.notes.string, song.stringSynth, 'string');
@@ -3398,6 +3522,73 @@ function getDrumReverbImpulseDecay(decay) {
   return 0.8 + normalized * 4.2;
 }
 
+function getDrumFilterStageCount(slope) {
+  const normalizedSlope = normalizeDrumFilterSlope(slope, 12);
+  if (normalizedSlope >= 96) return 8;
+  if (normalizedSlope >= 48) return 4;
+  if (normalizedSlope >= 24) return 2;
+  return 1;
+}
+
+function rebuildDrumFilterChain(drumsRouting, ctx, enabled, type, slope) {
+  if (!drumsRouting?.filterInput || !drumsRouting?.filterOutput || !drumsRouting?.filterBypass) return;
+  const configKey = `${enabled ? 1 : 0}:${type}:${slope}`;
+  if (drumsRouting.filterConfigKey === configKey) return;
+
+  disconnectNode(drumsRouting.filterInput);
+  drumsRouting.filterStages?.forEach(stage => disconnectNode(stage));
+  drumsRouting.filterStages = [];
+
+  drumsRouting.filterInput.connect(drumsRouting.filterBypass);
+  if (enabled) {
+    const stageCount = getDrumFilterStageCount(slope);
+    const stages = Array.from({ length: stageCount }, () => ctx.createBiquadFilter());
+    stages.forEach((stage, index) => {
+      stage.type = type;
+      if (index > 0) stages[index - 1].connect(stage);
+    });
+    drumsRouting.filterInput.connect(stages[0]);
+    stages[stages.length - 1].connect(drumsRouting.filterOutput);
+    drumsRouting.filterStages = stages;
+  }
+
+  drumsRouting.filterConfigKey = configKey;
+}
+
+function applyDrumFilterCutoffToRouting(drumsRouting, cutoff, ctx, smoothing = 0.02) {
+  if (!drumsRouting?.filterStages?.length) return;
+  drumsRouting.filterStages.forEach(stage => {
+    setAudioParamSmooth(stage.frequency, cutoff, ctx, smoothing);
+  });
+}
+
+function getDrumFilterCutoffAtTransportStep(transportStep) {
+  const drumFx = song.drumFx || {};
+  const baseCutoff = clampNumber(drumFx.filterCutoff, 20000, 20, 20000);
+  if (!Boolean(drumFx.filterEnabled)) return baseCutoff;
+  if (!Boolean(drumFx.filterLfoEnabled)) return baseCutoff;
+  const depth = clampNumber(drumFx.filterLfoDepth, 0, 0, 1);
+  if (depth <= 0.0001) return baseCutoff;
+  const pattern = getDrumFilterLfoPattern();
+  const lfoGain = getLfoGainAtTransportStep(pattern, transportStep);
+  return clampNumber(baseCutoff * (1 - depth + depth * lfoGain), baseCutoff, 20, 20000);
+}
+
+function applyDrumFilterLfoAtStep(time, transportStep) {
+  if (!audioRouting?.drums || !audioCtx) return;
+  const drumFx = song.drumFx || {};
+  if (!Boolean(drumFx.filterEnabled) || !Boolean(drumFx.filterLfoEnabled)) return;
+  if (!audioRouting.drums.filterStages?.length) return;
+  const depth = clampNumber(drumFx.filterLfoDepth, 0, 0, 1);
+  if (depth <= 0.0001) return;
+  const pattern = getDrumFilterLfoPattern();
+  const bpm = clampInt(song?.bpm, 100, 40, 300);
+  const stepSeconds = (60 / bpm) / 4;
+  const smoothing = clampNumber(pattern?.smoothing, 0.08, 0, 1);
+  const rampSeconds = Math.max(0.002, Math.min(stepSeconds * 0.95, 0.004 + smoothing * stepSeconds));
+  applyDrumFilterCutoffToRouting(audioRouting.drums, getDrumFilterCutoffAtTransportStep(transportStep), audioCtx, rampSeconds);
+}
+
 function getLfoShapeAmount(shape, phase) {
   const normalized = Math.max(0, Math.min(0.9999, Number(phase) || 0));
   if (shape === 'triangle') return normalized < 0.5 ? normalized * 2 : (1 - normalized) * 2;
@@ -3481,6 +3672,7 @@ function applyAmpLfoAtStep(time, transportStep, patternIds = currentLfoPatternId
       });
     });
   }
+  applyDrumFilterLfoAtStep(time, transportStep);
 }
 
 function setAudioParamSmooth(param, value, ctx = audioCtx, ramp = 0.015) {
@@ -3540,13 +3732,19 @@ function setupAudioRouting() {
   const drumsGain = ctx.createGain();
   const drumsDistortionInput = ctx.createGain();
   const drumsDistortion = ctx.createWaveShaper();
+  const drumsFilterInput = ctx.createGain();
+  const drumsFilterBypass = ctx.createGain();
+  const drumsFilterOutput = ctx.createGain();
   const drumsReverb = ctx.createConvolver();
   const drumsDry = ctx.createGain();
   const drumsWet = ctx.createGain();
   drumsGain.connect(drumsDistortionInput);
   drumsDistortionInput.connect(drumsDistortion);
-  drumsDistortion.connect(drumsDry);
-  drumsDistortion.connect(drumsReverb);
+  drumsDistortion.connect(drumsFilterInput);
+  drumsFilterInput.connect(drumsFilterBypass);
+  drumsFilterBypass.connect(drumsFilterOutput);
+  drumsFilterOutput.connect(drumsDry);
+  drumsFilterOutput.connect(drumsReverb);
   drumsReverb.connect(drumsWet);
   drumsDry.connect(master);
   drumsWet.connect(master);
@@ -3560,6 +3758,11 @@ function setupAudioRouting() {
       input: drumsGain,
       distortionInput: drumsDistortionInput,
       distortion: drumsDistortion,
+      filterInput: drumsFilterInput,
+      filterBypass: drumsFilterBypass,
+      filterOutput: drumsFilterOutput,
+      filterStages: [],
+      filterConfigKey: '',
       reverb: drumsReverb,
       dry: drumsDry,
       wet: drumsWet,
@@ -4800,7 +5003,7 @@ function renderMixerPanel() {
   title.textContent = 'Mixer';
   const help = document.createElement('p');
   help.className = 'mixer-help';
-  help.textContent = 'Balance chord, bass, string, and drum levels. Drum-machine-only distortion/reverb is in the Drum Sequencer panel.';
+  help.textContent = 'Balance chord, bass, string, and drum levels. Drum-machine-only distortion/filter/reverb is in the Drum Sequencer panel.';
 
   const controls = document.createElement('div');
   controls.className = 'mixer-controls';
@@ -4888,6 +5091,95 @@ function buildDrumFxControls() {
   );
   distortionCard.append(distortionTop, distortionGrid);
 
+  const filterCard = document.createElement('div');
+  filterCard.className = 'drum-fx-card';
+  const filterTop = document.createElement('div');
+  filterTop.className = 'drum-fx-card-top';
+  const filterLabel = document.createElement('span');
+  filterLabel.textContent = 'Filter';
+  const filterEnabledLabel = document.createElement('label');
+  filterEnabledLabel.className = 'checkbox-inline';
+  const filterEnabledInput = document.createElement('input');
+  filterEnabledInput.type = 'checkbox';
+  filterEnabledInput.checked = Boolean(drumFx.filterEnabled);
+  filterEnabledInput.setAttribute('aria-label', 'Drum filter enabled');
+  filterEnabledInput.addEventListener('change', () => updateDrumFxField('filterEnabled', filterEnabledInput.checked));
+  filterEnabledLabel.append(filterEnabledInput, document.createTextNode('On'));
+  filterTop.append(filterLabel, filterEnabledLabel);
+
+  const filterLfoPatternId = getValidDrumFilterLfoPatternId(drumFx.filterLfoPatternId, getDefaultLfoPatternId());
+  const filterLfoPatternSelect = buildSynthSelectControl(
+    'LFO pattern',
+    filterLfoPatternId || '',
+    (song.lfoPatterns || []).map(pattern => ({ value: pattern.id, label: pattern.name })),
+    'Drum filter LFO pattern',
+    value => updateDrumFxField('filterLfoPatternId', value),
+  );
+  const filterLfoPatternSelectInput = filterLfoPatternSelect.querySelector('select');
+  if (filterLfoPatternSelectInput) filterLfoPatternSelectInput.id = 'drum-filter-lfo-pattern-select';
+  const filterGrid = document.createElement('div');
+  filterGrid.className = 'drum-fx-card-grid';
+  filterGrid.append(
+    buildSynthSelectControl(
+      'Type',
+      normalizeDrumFilterType(drumFx.filterType, 'lowpass'),
+      DRUM_FILTER_TYPES,
+      'Drum filter type',
+      value => updateDrumFxField('filterType', value),
+    ),
+    buildSynthSelectControl(
+      'Slope',
+      String(normalizeDrumFilterSlope(drumFx.filterSlope, 12)),
+      DRUM_FILTER_SLOPE_OPTIONS.map(option => ({ value: String(option.value), label: option.label })),
+      'Drum filter slope',
+      value => updateDrumFxField('filterSlope', value),
+    ),
+    buildDrumFxRangeSlider(
+      'Cutoff',
+      drumFx.filterCutoff,
+      20,
+      20000,
+      10,
+      value => `${Math.round(value)} Hz`,
+      'Drum filter cutoff',
+      value => updateDrumFxField('filterCutoff', value),
+    ),
+    buildDrumFxRangeSlider(
+      'Q',
+      drumFx.filterResonance,
+      0.2,
+      12,
+      0.1,
+      value => value.toFixed(1),
+      'Drum filter resonance',
+      value => updateDrumFxField('filterResonance', value),
+    ),
+    filterLfoPatternSelect,
+  );
+
+  const filterLfoRow = document.createElement('div');
+  filterLfoRow.className = 'drum-fx-inline-row';
+  const filterLfoEnabledLabel = document.createElement('label');
+  filterLfoEnabledLabel.className = 'checkbox-inline';
+  filterLfoEnabledLabel.textContent = 'LFO';
+  const filterLfoEnabledInput = document.createElement('input');
+  filterLfoEnabledInput.type = 'checkbox';
+  filterLfoEnabledInput.checked = Boolean(drumFx.filterLfoEnabled);
+  filterLfoEnabledInput.setAttribute('aria-label', 'Drum filter LFO enabled');
+  filterLfoEnabledInput.addEventListener('change', () => updateDrumFxField('filterLfoEnabled', filterLfoEnabledInput.checked));
+  filterLfoEnabledLabel.prepend(filterLfoEnabledInput);
+  filterLfoRow.append(
+    filterLfoEnabledLabel,
+    buildDrumFxSlider(
+      'LFO depth',
+      drumFx.filterLfoDepth,
+      value => `${Math.round(value * 100)}%`,
+      'Drum filter LFO depth',
+      value => updateDrumFxField('filterLfoDepth', value),
+    ),
+  );
+  filterCard.append(filterTop, filterGrid, filterLfoRow);
+
   const reverbCard = document.createElement('div');
   reverbCard.className = 'drum-fx-card';
   const reverbTop = document.createElement('div');
@@ -4922,7 +5214,7 @@ function buildDrumFxControls() {
   );
   reverbCard.append(reverbTop, reverbGrid);
 
-  wrap.append(title, distortionCard, reverbCard);
+  wrap.append(title, distortionCard, filterCard, reverbCard);
   return wrap;
 }
 
@@ -4948,6 +5240,35 @@ function buildDrumFxSlider(labelText, value, format, ariaLabel, onInput) {
   input.setAttribute('aria-label', ariaLabel);
   input.addEventListener('input', () => {
     const next = clampNumber(input.value, clamped, 0, 1);
+    valueText.textContent = format(next);
+    onInput(next);
+  });
+  row.append(top, input);
+  return row;
+}
+
+function buildDrumFxRangeSlider(labelText, value, min, max, step, format, ariaLabel, onInput) {
+  const row = document.createElement('label');
+  row.className = 'synth-slider';
+  const top = document.createElement('div');
+  top.className = 'synth-slider-top';
+  const label = document.createElement('span');
+  label.textContent = labelText;
+  const valueText = document.createElement('span');
+  valueText.className = 'synth-slider-value';
+  const clamped = clampNumber(value, min, min, max);
+  valueText.textContent = format(clamped);
+  top.append(label, valueText);
+
+  const input = document.createElement('input');
+  input.type = 'range';
+  input.min = String(min);
+  input.max = String(max);
+  input.step = String(step);
+  input.value = String(clamped);
+  input.setAttribute('aria-label', ariaLabel);
+  input.addEventListener('input', () => {
+    const next = clampNumber(input.value, clamped, min, max);
     valueText.textContent = format(next);
     onInput(next);
   });
