@@ -1139,6 +1139,35 @@ input[type='range'] {
   gap: 0.3rem;
   margin-top: 0.1rem;
 }
+.part-toggle-row {
+  display: flex;
+  width: 100%;
+  gap: 0.25rem;
+  margin-top: 0.1rem;
+}
+.part-in-btn {
+  flex: 1;
+  background: rgba(231, 76, 60, 0.15);
+  color: var(--danger);
+  border: 1px solid rgba(231, 76, 60, 0.3);
+  border-radius: 7px;
+  height: 1.7rem;
+  padding: 0 0.2rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms, color 120ms, border-color 120ms;
+}
+.part-in-btn.active {
+  background: rgba(46, 204, 113, 0.15);
+  color: var(--success);
+  border-color: rgba(46, 204, 113, 0.35);
+}
+.part-in-btn:not(:disabled):hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
 .audition-btn {
   background: rgba(46, 204, 113, 0.15);
   color: var(--success);
