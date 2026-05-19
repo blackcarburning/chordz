@@ -798,6 +798,8 @@ input[type='range'] {
   display: flex;
   gap: 0.25rem;
   margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 .section-play-select {
   display: inline-flex;

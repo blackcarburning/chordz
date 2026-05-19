@@ -879,6 +879,7 @@ const synthPanelExpanded = { chord: true, bass: true, string: true };
 let editingDrumPatternId = null;
 let editingLfoPatternId = null;
 let copiedChordConfig = null;
+let copiedSectionConfig = null;
 let copiedDrumPatternConfig = null;
 let copiedLfoPatternConfig = null;
 let activePitchTarget = null;
@@ -1076,6 +1077,69 @@ function cloneChordForClipboard(chord) {
     ...copied
   } = normalizeChord(chord, getDefaultDrumPatternId(), getDefaultLfoPatternId());
   return deepClone(copied);
+}
+
+function cloneSectionForClipboard(section) {
+  if (!section) return null;
+  const normalized = normalizeSection(section, section.type, getDefaultDrumPatternId(), getDefaultLfoPatternId());
+  return deepClone(normalized);
+}
+
+function cloneSectionForInsert(section) {
+  if (!section) return null;
+  const cloned = normalizeSection(deepClone(section), section.type, getDefaultDrumPatternId(), getDefaultLfoPatternId());
+  cloned.id = makeId();
+  cloned.chords = (cloned.chords || []).map(chord => normalizeChord({ ...deepClone(chord), id: makeId() }, getDefaultDrumPatternId(), getDefaultLfoPatternId()));
+  return cloned;
+}
+
+function getCopiedSectionConfiguration() {
+  return copiedSectionConfig
+    ? normalizeSection(deepClone(copiedSectionConfig), copiedSectionConfig.type, getDefaultDrumPatternId(), getDefaultLfoPatternId())
+    : null;
+}
+
+function updateSectionClipboardActionState() {
+  const hasSection = Boolean(copiedSectionConfig);
+  document.querySelectorAll('button[data-requires-section-copy="true"]').forEach(button => {
+    button.disabled = !hasSection;
+    const enabledTitle = button.dataset.titleEnabled || button.title;
+    const emptyTitle = button.dataset.titleEmpty || 'Copy a section first';
+    button.title = hasSection ? enabledTitle : emptyTitle;
+  });
+}
+
+function applySectionSettingsOnly(sourceSection, targetSection) {
+  if (!sourceSection || !targetSection) return;
+  targetSection.scaleRoot = sourceSection.scaleRoot;
+  targetSection.scaleType = sourceSection.scaleType;
+  targetSection.crashOnStart = sourceSection.crashOnStart;
+  targetSection.rollAtEnd = sourceSection.rollAtEnd;
+  const sourceChords = Array.isArray(sourceSection.chords) ? sourceSection.chords : [];
+  targetSection.chords.forEach((targetChord, index) => {
+    const sourceChord = sourceChords[index];
+    if (!sourceChord) return;
+    const targetId = targetChord.id;
+    const preservedRoot = targetChord.root;
+    const preservedType = targetChord.type;
+    const preservedBassRoot = targetChord.bassRoot;
+    const preservedStringRoot = targetChord.stringRoot;
+    const normalized = normalizeChord({
+      ...deepClone(sourceChord),
+      id: targetId,
+      root: preservedRoot,
+      type: preservedType,
+      bassRoot: preservedBassRoot,
+      stringRoot: preservedStringRoot,
+    }, getDefaultDrumPatternId(), getDefaultLfoPatternId());
+    Object.assign(targetChord, normalized, {
+      id: targetId,
+      root: preservedRoot,
+      type: preservedType,
+      bassRoot: preservedBassRoot,
+      stringRoot: preservedStringRoot,
+    });
+  });
 }
 
 function cloneDrumPatternForClipboard(pattern) {
@@ -2114,6 +2178,59 @@ function copyChordConfiguration(sectionId, chordId) {
   const chord = section?.chords.find(entry => entry.id === chordId);
   if (!chord) return;
   copiedChordConfig = cloneChordForClipboard(chord);
+}
+
+function copySectionConfiguration(sectionId) {
+  const section = song.sections.find(entry => entry.id === sectionId);
+  if (!section) return;
+  copiedSectionConfig = cloneSectionForClipboard(section);
+  updateSectionClipboardActionState();
+}
+
+function pasteSectionSettings(sectionId) {
+  const targetSection = song.sections.find(entry => entry.id === sectionId);
+  if (!targetSection) return;
+  const sourceSection = getCopiedSectionConfiguration();
+  if (!sourceSection) {
+    alert('Copy a section first.');
+    return;
+  }
+  applySectionSettingsOnly(sourceSection, targetSection);
+  handleSchedulingParameterChange({ rerender: true, refreshCursor: true });
+}
+
+function pasteSectionAll(sectionId) {
+  const targetSection = song.sections.find(entry => entry.id === sectionId);
+  if (!targetSection) return;
+  const sourceSection = getCopiedSectionConfiguration();
+  if (!sourceSection) {
+    alert('Copy a section first.');
+    return;
+  }
+  if (!confirm('Paste All will replace this section chords and settings. Continue?')) return;
+  targetSection.type = sourceSection.type;
+  targetSection.name = sourceSection.name;
+  targetSection.scaleRoot = sourceSection.scaleRoot;
+  targetSection.scaleType = sourceSection.scaleType;
+  targetSection.crashOnStart = sourceSection.crashOnStart;
+  targetSection.rollAtEnd = sourceSection.rollAtEnd;
+  targetSection.chords = (sourceSection.chords || []).map(chord => normalizeChord({ ...deepClone(chord), id: makeId() }, getDefaultDrumPatternId(), getDefaultLfoPatternId()));
+  handleSchedulingParameterChange({ rerender: true, refreshCursor: true });
+}
+
+function pasteSectionAsNewSection(afterSectionId) {
+  const sourceSection = getCopiedSectionConfiguration();
+  if (!sourceSection) {
+    alert('Copy a section first.');
+    return;
+  }
+  const insertedSection = cloneSectionForInsert(sourceSection);
+  if (!insertedSection) return;
+  const currentIndex = song.sections.findIndex(section => section.id === afterSectionId);
+  if (currentIndex < 0) song.sections.push(insertedSection);
+  else song.sections.splice(currentIndex + 1, 0, insertedSection);
+  song.selectedSectionId = insertedSection.id;
+  handleSchedulingParameterChange({ rerender: true, refreshCursor: true });
 }
 
 function pasteChordConfiguration(sectionId, chordId) {
@@ -5010,6 +5127,7 @@ function render({ preservePlaybackCursor = false } = {}) {
   if (!container) return;
   container.innerHTML = '';
   song.sections.forEach(section => container.appendChild(buildSection(section)));
+  updateSectionClipboardActionState();
   updateSongGoToControl();
   updatePlaybackModeUI();
   if (!(preservePlaybackCursor && isBeating)) initializePlaybackCursor();
@@ -6273,11 +6391,52 @@ function buildSectionHeader(section) {
 
   const actions = document.createElement('div');
   actions.className = 'section-header-actions';
+  const copyButton = document.createElement('button');
+  copyButton.type = 'button';
+  copyButton.className = 'mini-action-btn';
+  copyButton.textContent = 'Copy Section';
+  copyButton.title = 'Copy this section';
+  copyButton.setAttribute('aria-label', 'Copy this section');
+  copyButton.addEventListener('click', () => copySectionConfiguration(section.id));
+
+  const pasteSettingsButton = document.createElement('button');
+  pasteSettingsButton.type = 'button';
+  pasteSettingsButton.className = 'mini-action-btn';
+  pasteSettingsButton.textContent = 'Paste Settings';
+  pasteSettingsButton.dataset.requiresSectionCopy = 'true';
+  pasteSettingsButton.dataset.titleEnabled = 'Paste copied section settings (keeps this section name and chord roots/types)';
+  pasteSettingsButton.dataset.titleEmpty = 'Copy a section first';
+  pasteSettingsButton.title = pasteSettingsButton.dataset.titleEnabled;
+  pasteSettingsButton.setAttribute('aria-label', 'Paste copied section settings');
+  pasteSettingsButton.addEventListener('click', () => pasteSectionSettings(section.id));
+
+  const pasteAllButton = document.createElement('button');
+  pasteAllButton.type = 'button';
+  pasteAllButton.className = 'mini-action-btn';
+  pasteAllButton.textContent = 'Paste All';
+  pasteAllButton.dataset.requiresSectionCopy = 'true';
+  pasteAllButton.dataset.titleEnabled = 'Paste all copied section data (replaces this section chords/settings)';
+  pasteAllButton.dataset.titleEmpty = 'Copy a section first';
+  pasteAllButton.title = pasteAllButton.dataset.titleEnabled;
+  pasteAllButton.setAttribute('aria-label', 'Paste all copied section data');
+  pasteAllButton.addEventListener('click', () => pasteSectionAll(section.id));
+
+  const pasteNewButton = document.createElement('button');
+  pasteNewButton.type = 'button';
+  pasteNewButton.className = 'mini-action-btn';
+  pasteNewButton.textContent = 'Paste as New';
+  pasteNewButton.dataset.requiresSectionCopy = 'true';
+  pasteNewButton.dataset.titleEnabled = 'Insert copied section as a new section after this one';
+  pasteNewButton.dataset.titleEmpty = 'Copy a section first';
+  pasteNewButton.title = pasteNewButton.dataset.titleEnabled;
+  pasteNewButton.setAttribute('aria-label', 'Paste copied section as new section');
+  pasteNewButton.addEventListener('click', () => pasteSectionAsNewSection(section.id));
+
   const upButton = makeIconBtn('↑', 'Move section up', () => moveSectionUp(section.id));
   const downButton = makeIconBtn('↓', 'Move section down', () => moveSectionDown(section.id));
   const removeButton = makeIconBtn('✕', 'Remove section', () => removeSection(section.id));
   removeButton.classList.add('danger');
-  actions.append(upButton, downButton, removeButton);
+  actions.append(copyButton, pasteSettingsButton, pasteAllButton, pasteNewButton, upButton, downButton, removeButton);
 
   header.append(badge, playSelect, nameInput, actions);
   return header;
