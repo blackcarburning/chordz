@@ -133,6 +133,7 @@ const LFO_SHAPE_OPTIONS = [
   { value: 'up', label: 'Ramp Up' },
   { value: 'square', label: 'Gate' },
   { value: 'pump', label: 'Pump' },
+  { value: 'custom', label: 'Custom' },
 ];
 const LFO_RATE_OPTIONS = [
   { value: 0.25, label: '1/16' },
@@ -141,10 +142,16 @@ const LFO_RATE_OPTIONS = [
   { value: 2, label: '1/2' },
   { value: 4, label: '1 bar' },
 ];
+const LFO_TIMING_OPTIONS = [
+  { value: 'straight', label: 'Straight' },
+  { value: 'dotted', label: 'Dotted' },
+  { value: 'triplet', label: 'Triplet' },
+];
 const LFO_PRESET_NAMES = [
   'LFO Off', 'Pump 1/4', 'Gate 1/8',
   'Pattern 4', 'Pattern 5', 'Pattern 6', 'Pattern 7', 'Pattern 8', 'Pattern 9', 'Pattern 10',
 ];
+const LFO_CUSTOM_POINT_COUNT = 17;
 
 const SYNTH_PRESET_LIBRARY = {
   chord: {
@@ -649,14 +656,15 @@ function createDefaultDrumPattern(index) {
 
 function createDefaultLfoPattern(index) {
   const defaults = index === 1
-    ? { enabled: true, depth: 1, rateBeats: 1, shape: 'pump', smoothing: 0.18, phase: 0 }
+    ? { enabled: true, depth: 1, rateBeats: 1, shape: 'pump', timingFeel: 'straight', smoothing: 0.18, phase: 0 }
     : index === 2
-      ? { enabled: true, depth: 0.72, rateBeats: 0.5, shape: 'square', smoothing: 0.04, phase: 0 }
-      : { enabled: false, depth: 0.85, rateBeats: 1, shape: 'sine', smoothing: 0.08, phase: 0 };
+      ? { enabled: true, depth: 0.72, rateBeats: 0.5, shape: 'square', timingFeel: 'straight', smoothing: 0.04, phase: 0 }
+      : { enabled: false, depth: 0.85, rateBeats: 1, shape: 'sine', timingFeel: 'straight', smoothing: 0.08, phase: 0 };
   return {
     id: makeId(),
     name: LFO_PRESET_NAMES[index] || `Pattern ${index + 1}`,
     ...defaults,
+    customPoints: createDefaultLfoCustomPoints(),
   };
 }
 
@@ -695,6 +703,71 @@ function normalizeLfoShape(value, fallback = 'sine') {
   return valid.includes(value) ? value : fallback;
 }
 
+function normalizeLfoTimingFeel(value, fallback = 'straight') {
+  const valid = LFO_TIMING_OPTIONS.map(option => option.value);
+  return valid.includes(value) ? value : fallback;
+}
+
+function createDefaultLfoCustomPoints() {
+  const maxIndex = Math.max(1, LFO_CUSTOM_POINT_COUNT - 1);
+  return Array.from({ length: LFO_CUSTOM_POINT_COUNT }, (_, index) => ({
+    x: index / maxIndex,
+    y: 1,
+  }));
+}
+
+function sampleLfoPointY(points, x) {
+  if (!Array.isArray(points) || !points.length) return 1;
+  const clampedX = clampNumber(x, 0, 0, 1);
+  if (points.length === 1) return clampNumber(points[0]?.y, 1, 0, 1);
+  if (clampedX <= points[0].x) return points[0].y;
+  if (clampedX >= points[points.length - 1].x) return points[points.length - 1].y;
+  for (let index = 1; index < points.length; index++) {
+    const prev = points[index - 1];
+    const next = points[index];
+    if (clampedX > next.x) continue;
+    const span = Math.max(0.000001, next.x - prev.x);
+    const mix = (clampedX - prev.x) / span;
+    return prev.y + (next.y - prev.y) * mix;
+  }
+  return points[points.length - 1].y;
+}
+
+function normalizeLfoCustomPoints(rawPoints, fallback = null) {
+  const fallbackPoints = Array.isArray(fallback) && fallback.length
+    ? fallback
+    : createDefaultLfoCustomPoints();
+  const parsed = Array.isArray(rawPoints)
+    ? rawPoints
+      .map(point => ({
+        x: clampNumber(point?.x, NaN, 0, 1),
+        y: clampNumber(point?.y, NaN, 0, 1),
+      }))
+      .filter(point => Number.isFinite(point.x) && Number.isFinite(point.y))
+      .sort((a, b) => a.x - b.x)
+    : [];
+  const deduped = [];
+  parsed.forEach(point => {
+    const previous = deduped[deduped.length - 1];
+    if (previous && Math.abs(previous.x - point.x) < 0.0005) deduped[deduped.length - 1] = point;
+    else deduped.push(point);
+  });
+  const source = deduped.length >= 2 ? deduped : normalizeLfoCustomPoints(fallbackPoints, null);
+  const first = source[0];
+  const last = source[source.length - 1];
+  const withBounds = source.slice();
+  if (first.x > 0) withBounds.unshift({ x: 0, y: first.y });
+  if (last.x < 1) withBounds.push({ x: 1, y: last.y });
+  const maxIndex = Math.max(1, LFO_CUSTOM_POINT_COUNT - 1);
+  return Array.from({ length: LFO_CUSTOM_POINT_COUNT }, (_, index) => {
+    const x = index / maxIndex;
+    return {
+      x,
+      y: clampNumber(sampleLfoPointY(withBounds, x), 1, 0, 1),
+    };
+  });
+}
+
 function normalizeLfoPattern(raw, index = 0) {
   const fallback = createDefaultLfoPattern(index);
   return {
@@ -704,8 +777,10 @@ function normalizeLfoPattern(raw, index = 0) {
     depth: clampNumber(raw?.depth, fallback.depth, 0, 1),
     rateBeats: normalizeLfoRate(raw?.rateBeats, fallback.rateBeats),
     shape: normalizeLfoShape(raw?.shape, fallback.shape),
+    timingFeel: normalizeLfoTimingFeel(raw?.timingFeel, fallback.timingFeel),
     smoothing: clampNumber(raw?.smoothing, fallback.smoothing, 0, 1),
     phase: clampNumber(raw?.phase, fallback.phase, 0, 0.999),
+    customPoints: normalizeLfoCustomPoints(raw?.customPoints, fallback.customPoints),
   };
 }
 
@@ -1741,8 +1816,10 @@ function updateLfoPatternField(patternId, key, value) {
   else if (key === 'depth') pattern.depth = clampNumber(value, pattern.depth, 0, 1);
   else if (key === 'rateBeats') pattern.rateBeats = normalizeLfoRate(value, pattern.rateBeats);
   else if (key === 'shape') pattern.shape = normalizeLfoShape(value, pattern.shape);
+  else if (key === 'timingFeel') pattern.timingFeel = normalizeLfoTimingFeel(value, pattern.timingFeel);
   else if (key === 'smoothing') pattern.smoothing = clampNumber(value, pattern.smoothing, 0, 1);
   else if (key === 'phase') pattern.phase = clampNumber(value, pattern.phase, 0, 0.999);
+  else if (key === 'customPoints') pattern.customPoints = normalizeLfoCustomPoints(value, pattern.customPoints);
   else return;
   handleSynthParameterChange();
 }
@@ -2907,17 +2984,30 @@ function getLfoShapeAmount(shape, phase) {
   return 0.5 - 0.5 * Math.cos(normalized * Math.PI * 2);
 }
 
+function getCustomLfoShapeAmount(points, phase) {
+  return clampNumber(sampleLfoPointY(points, phase), 1, 0, 1);
+}
+
 function getLfoGainAtTransportStep(pattern, transportStep) {
   const resolved = pattern || getLfoPatternById(getDefaultLfoPatternId());
   if (!resolved || !resolved.enabled) return 1;
   const depth = clampNumber(resolved.depth, 0, 0, 1);
   if (depth <= 0.0001) return 1;
-  const cycleBeats = normalizeLfoRate(resolved.rateBeats, 1);
-  const cycleSteps = Math.max(1, Math.round(cycleBeats * 4));
-  const wrappedStep = ((Math.floor(Number(transportStep) || 0) % cycleSteps) + cycleSteps) % cycleSteps;
-  const phaseOffsetSteps = Math.round(clampNumber(resolved.phase, 0, 0, 0.999) * cycleSteps) % cycleSteps;
+  const feelMultiplier = getDelayFeelMultiplier(normalizeLfoTimingFeel(resolved.timingFeel, 'straight'));
+  const cycleBeats = normalizeLfoRate(resolved.rateBeats, 1) * feelMultiplier;
+  const cycleSteps = Math.max(0.25, cycleBeats * 4);
+  const wrappedStep = ((Number(transportStep) || 0) % cycleSteps + cycleSteps) % cycleSteps;
+  const phaseOffsetSteps = clampNumber(resolved.phase, 0, 0, 0.999) * cycleSteps;
   const phase = ((wrappedStep + phaseOffsetSteps) % cycleSteps) / cycleSteps;
-  const amount = getLfoShapeAmount(normalizeLfoShape(resolved.shape, 'sine'), phase);
+  const shape = normalizeLfoShape(resolved.shape, 'sine');
+  const amount = shape === 'custom'
+    ? getCustomLfoShapeAmount(
+      Array.isArray(resolved.customPoints) && resolved.customPoints.length
+        ? resolved.customPoints
+        : createDefaultLfoCustomPoints(),
+      phase,
+    )
+    : getLfoShapeAmount(shape, phase);
   return Math.max(0.0001, (1 - depth) + depth * amount);
 }
 
@@ -4365,6 +4455,175 @@ function renderSynthRack() {
   rack.appendChild(buildSynthCard('string'));
 }
 
+function buildLfoCustomShapeEditor(pattern) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'lfo-custom-editor';
+
+  const header = document.createElement('div');
+  header.className = 'lfo-custom-editor-top';
+  const title = document.createElement('span');
+  title.textContent = 'Custom shape (4 beats)';
+  const resetButton = document.createElement('button');
+  resetButton.type = 'button';
+  resetButton.className = 'mini-action-btn';
+  resetButton.textContent = 'Reset';
+  resetButton.title = 'Reset custom LFO shape';
+  header.append(title, resetButton);
+
+  const canvas = document.createElement('canvas');
+  canvas.className = 'lfo-custom-canvas';
+  canvas.width = 520;
+  canvas.height = 180;
+  canvas.setAttribute('aria-label', 'Custom amplitude LFO drawing grid');
+
+  const hint = document.createElement('p');
+  hint.className = 'synth-subtitle';
+  hint.textContent = 'Drag to draw amplitude over 4 beats (top = full, bottom = muted).';
+
+  const gridPadding = { left: 14, right: 14, top: 10, bottom: 20 };
+  let points = normalizeLfoCustomPoints(pattern.customPoints);
+  if (!Array.isArray(pattern.customPoints) || pattern.customPoints.length !== points.length) {
+    pattern.customPoints = points;
+  }
+  const indexMax = Math.max(1, points.length - 1);
+
+  const getCanvasMetrics = () => ({
+    width: canvas.width,
+    height: canvas.height,
+    left: gridPadding.left,
+    right: canvas.width - gridPadding.right,
+    top: gridPadding.top,
+    bottom: canvas.height - gridPadding.bottom,
+  });
+
+  const pointToCanvas = point => {
+    const metrics = getCanvasMetrics();
+    const drawWidth = Math.max(1, metrics.right - metrics.left);
+    const drawHeight = Math.max(1, metrics.bottom - metrics.top);
+    return {
+      x: metrics.left + point.x * drawWidth,
+      y: metrics.top + (1 - point.y) * drawHeight,
+    };
+  };
+
+  const draw = () => {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const metrics = getCanvasMetrics();
+    const drawWidth = Math.max(1, metrics.right - metrics.left);
+    const drawHeight = Math.max(1, metrics.bottom - metrics.top);
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+    ctx.fillRect(metrics.left, metrics.top, drawWidth, drawHeight);
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+    ctx.lineWidth = 1;
+    for (let beat = 0; beat <= 4; beat++) {
+      const x = metrics.left + (beat / 4) * drawWidth;
+      ctx.beginPath();
+      ctx.moveTo(x, metrics.top);
+      ctx.lineTo(x, metrics.bottom);
+      ctx.stroke();
+    }
+    for (let row = 0; row <= 4; row++) {
+      const y = metrics.top + (row / 4) * drawHeight;
+      ctx.beginPath();
+      ctx.moveTo(metrics.left, y);
+      ctx.lineTo(metrics.right, y);
+      ctx.stroke();
+    }
+
+    ctx.strokeStyle = '#7b61ff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    points.forEach((point, index) => {
+      const pos = pointToCanvas(point);
+      if (index === 0) ctx.moveTo(pos.x, pos.y);
+      else ctx.lineTo(pos.x, pos.y);
+    });
+    ctx.stroke();
+
+    ctx.fillStyle = '#f5a623';
+    points.forEach(point => {
+      const pos = pointToCanvas(point);
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  };
+
+  const setPoints = nextPoints => {
+    const normalized = normalizeLfoCustomPoints(nextPoints, points);
+    points = normalized;
+    updateLfoPatternField(pattern.id, 'customPoints', normalized);
+    draw();
+  };
+
+  const eventToPoint = event => {
+    const rect = canvas.getBoundingClientRect();
+    const px = clampNumber(event.clientX - rect.left, 0, 0, rect.width);
+    const py = clampNumber(event.clientY - rect.top, 0, 0, rect.height);
+    return {
+      x: rect.width > 0 ? px / rect.width : 0,
+      y: rect.height > 0 ? 1 - (py / rect.height) : 1,
+    };
+  };
+
+  let drawing = false;
+  let lastIndex = null;
+  let lastY = null;
+  const paintPoint = (event, isStart = false) => {
+    const normalized = eventToPoint(event);
+    const targetIndex = Math.max(0, Math.min(indexMax, Math.round(normalized.x * indexMax)));
+    const targetY = clampNumber(normalized.y, 1, 0, 1);
+    const nextPoints = points.map(point => ({ x: point.x, y: point.y }));
+    if (isStart || lastIndex === null || lastY === null) {
+      nextPoints[targetIndex].y = targetY;
+    } else {
+      const step = targetIndex >= lastIndex ? 1 : -1;
+      const steps = Math.max(1, Math.abs(targetIndex - lastIndex));
+      for (let index = 0; index <= steps; index++) {
+        const offset = index * step;
+        const pointIndex = lastIndex + offset;
+        const mix = index / steps;
+        nextPoints[pointIndex].y = clampNumber(lastY + (targetY - lastY) * mix, targetY, 0, 1);
+      }
+    }
+    lastIndex = targetIndex;
+    lastY = targetY;
+    setPoints(nextPoints);
+  };
+
+  canvas.addEventListener('pointerdown', event => {
+    if (event.button !== 0) return;
+    drawing = true;
+    lastIndex = null;
+    lastY = null;
+    canvas.setPointerCapture(event.pointerId);
+    paintPoint(event, true);
+  });
+  canvas.addEventListener('pointermove', event => {
+    if (!drawing) return;
+    paintPoint(event);
+  });
+  const stopDrawing = event => {
+    if (!drawing) return;
+    drawing = false;
+    lastIndex = null;
+    lastY = null;
+    if (event && canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+  };
+  canvas.addEventListener('pointerup', stopDrawing);
+  canvas.addEventListener('pointercancel', stopDrawing);
+
+  resetButton.addEventListener('click', () => setPoints(createDefaultLfoCustomPoints()));
+  draw();
+
+  wrapper.append(header, canvas, hint);
+  return wrapper;
+}
+
 function buildLfoPatternCard() {
   const card = document.createElement('section');
   card.className = 'synth-card';
@@ -4397,7 +4656,10 @@ function buildLfoPatternCard() {
     normalizeLfoShape(pattern.shape, 'sine'),
     LFO_SHAPE_OPTIONS,
     'Amplitude LFO shape',
-    value => updateLfoPatternField(pattern.id, 'shape', value),
+    value => {
+      updateLfoPatternField(pattern.id, 'shape', value);
+      renderSynthRack();
+    },
   ));
   controlsGrid.appendChild(buildSynthSelectControl(
     'Rate',
@@ -4405,6 +4667,13 @@ function buildLfoPatternCard() {
     LFO_RATE_OPTIONS.map(option => ({ value: String(option.value), label: option.label })),
     'Amplitude LFO rate',
     value => updateLfoPatternField(pattern.id, 'rateBeats', Number(value)),
+  ));
+  controlsGrid.appendChild(buildSynthSelectControl(
+    'Timing',
+    normalizeLfoTimingFeel(pattern.timingFeel, 'straight'),
+    LFO_TIMING_OPTIONS,
+    'Amplitude LFO timing feel',
+    value => updateLfoPatternField(pattern.id, 'timingFeel', value),
   ));
 
   const nameRow = document.createElement('label');
@@ -4462,6 +4731,9 @@ function buildLfoPatternCard() {
   });
 
   card.append(header, controlsGrid);
+  if (normalizeLfoShape(pattern.shape, 'sine') === 'custom') {
+    card.appendChild(buildLfoCustomShapeEditor(pattern));
+  }
   return card;
 }
 
