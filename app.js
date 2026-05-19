@@ -335,6 +335,13 @@ const DELAY_FEEL_OPTIONS = [
   { value: 'triplet', label: 'Triplet' },
 ];
 
+const DRUM_DISTORTION_MODELS = [
+  { value: 'softClip', label: 'Soft clip' },
+  { value: 'hardClip', label: 'Hard clip' },
+  { value: 'foldback', label: 'Foldback' },
+  { value: 'tube', label: 'Tube / asym' },
+];
+
 const FILTER_POLE_OPTIONS = [
   { value: 1, label: '1-pole / 6 dB' },
   { value: 2, label: '2-pole / 12 dB' },
@@ -504,6 +511,11 @@ function normalizeDelayFeel(value, fallback = 'straight') {
   return valid.includes(value) ? value : fallback;
 }
 
+function normalizeDrumDistortionModel(value, fallback = 'softClip') {
+  const valid = DRUM_DISTORTION_MODELS.map(option => option.value);
+  return valid.includes(value) ? value : fallback;
+}
+
 function normalizeSynthSettings(kind, rawSynth, legacyPreset) {
   const synth = rawSynth || {};
   const presetId = resolvePresetId(kind, synth.preset || legacyPreset);
@@ -602,6 +614,14 @@ function createDefaultSong() {
       chordWet: 0.2,
       bassWet: 0.16,
       stringWet: 0.22,
+    },
+    drumFx: {
+      distortionEnabled: false,
+      distortionModel: 'softClip',
+      distortionDrive: 0,
+      reverbMix: 0,
+      reverbSize: 0.35,
+      reverbDecay: 0.45,
     },
     arranger: [],
     sections,
@@ -1243,6 +1263,16 @@ function normalizeSong(rawSong) {
       bassWet: clampNumber(parsed.reverb?.bassWet, base.reverb.bassWet, 0, 1),
       stringWet: clampNumber(parsed.reverb?.stringWet, base.reverb.stringWet, 0, 1),
     },
+    drumFx: {
+      distortionEnabled: parsed.drumFx?.distortionEnabled === undefined
+        ? base.drumFx.distortionEnabled
+        : Boolean(parsed.drumFx.distortionEnabled),
+      distortionModel: normalizeDrumDistortionModel(parsed.drumFx?.distortionModel, base.drumFx.distortionModel),
+      distortionDrive: clampNumber(parsed.drumFx?.distortionDrive, base.drumFx.distortionDrive, 0, 1),
+      reverbMix: clampNumber(parsed.drumFx?.reverbMix, base.drumFx.reverbMix, 0, 1),
+      reverbSize: clampNumber(parsed.drumFx?.reverbSize, base.drumFx.reverbSize, 0, 1),
+      reverbDecay: clampNumber(parsed.drumFx?.reverbDecay, base.drumFx.reverbDecay, 0, 1),
+    },
     arranger,
     sections,
   };
@@ -1842,6 +1872,26 @@ function updateReverbWet(kind, value) {
   if (!song.reverb) return;
   const key = kind === 'bass' ? 'bassWet' : kind === 'string' ? 'stringWet' : 'chordWet';
   song.reverb[key] = clampNumber(value, song.reverb[key], 0, 1);
+  commitSong();
+}
+
+function updateDrumFxField(field, value) {
+  if (!song.drumFx) return;
+  if (field === 'distortionEnabled') {
+    song.drumFx.distortionEnabled = Boolean(value);
+  } else if (field === 'distortionModel') {
+    song.drumFx.distortionModel = normalizeDrumDistortionModel(value, song.drumFx.distortionModel);
+  } else if (field === 'distortionDrive') {
+    song.drumFx.distortionDrive = clampNumber(value, song.drumFx.distortionDrive, 0, 1);
+  } else if (field === 'reverbMix') {
+    song.drumFx.reverbMix = clampNumber(value, song.drumFx.reverbMix, 0, 1);
+  } else if (field === 'reverbSize') {
+    song.drumFx.reverbSize = clampNumber(value, song.drumFx.reverbSize, 0, 1);
+  } else if (field === 'reverbDecay') {
+    song.drumFx.reverbDecay = clampNumber(value, song.drumFx.reverbDecay, 0, 1);
+  } else {
+    return;
+  }
   commitSong();
 }
 
@@ -2491,7 +2541,7 @@ function collectSongExportEvents() {
   return events;
 }
 
-function createOfflineImpulseResponse(ctx, seconds = 1.8, decay = 2.2) {
+function createImpulseResponseForContext(ctx, seconds = 1.8, decay = 2.2) {
   const length = Math.floor(ctx.sampleRate * seconds);
   const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
   for (let channel = 0; channel < impulse.numberOfChannels; channel++) {
@@ -2502,6 +2552,10 @@ function createOfflineImpulseResponse(ctx, seconds = 1.8, decay = 2.2) {
     }
   }
   return impulse;
+}
+
+function createOfflineImpulseResponse(ctx, seconds = 1.8, decay = 2.2) {
+  return createImpulseResponseForContext(ctx, seconds, decay);
 }
 
 function createOfflineRouting(ctx) {
@@ -2540,14 +2594,69 @@ function createOfflineRouting(ctx) {
     return { input, dry, wet, preDelay, delayDry, delayWet, delayFeedback, delay, delayFilter, output, ampLfo, convolver };
   };
   const drumsGain = ctx.createGain();
-  drumsGain.connect(master);
+  const drumsDistortionInput = ctx.createGain();
+  const drumsDistortion = ctx.createWaveShaper();
+  const drumsReverb = ctx.createConvolver();
+  const drumsDry = ctx.createGain();
+  const drumsWet = ctx.createGain();
+  drumsGain.connect(drumsDistortionInput);
+  drumsDistortionInput.connect(drumsDistortion);
+  drumsDistortion.connect(drumsDry);
+  drumsDistortion.connect(drumsReverb);
+  drumsReverb.connect(drumsWet);
+  drumsDry.connect(master);
+  drumsWet.connect(master);
   return {
     master,
     chord: makeInstrumentBus(),
     bass: makeInstrumentBus(),
     string: makeInstrumentBus(),
-    drums: { input: drumsGain, output: drumsGain },
+    drums: {
+      input: drumsGain,
+      distortionInput: drumsDistortionInput,
+      distortion: drumsDistortion,
+      reverb: drumsReverb,
+      dry: drumsDry,
+      wet: drumsWet,
+      output: drumsGain,
+      reverbSpecKey: '',
+    },
   };
+}
+
+function applyDrumFxSettingsToRouting(drumsRouting, ctx, smooth = true) {
+  if (!drumsRouting) return;
+  const mixer = song.mixer || {};
+  const drumFx = song.drumFx || {};
+  const distortionEnabled = drumFx.distortionEnabled === undefined ? false : Boolean(drumFx.distortionEnabled);
+  const distortionDrive = clampNumber(drumFx.distortionDrive, 0, 0, 1);
+  const effectiveDrive = distortionEnabled ? distortionDrive : 0;
+  const reverbMix = clampNumber(drumFx.reverbMix, 0, 0, 1);
+  const reverbSize = clampNumber(drumFx.reverbSize, 0.35, 0, 1);
+  const reverbDecay = clampNumber(drumFx.reverbDecay, 0.45, 0, 1);
+  const model = normalizeDrumDistortionModel(drumFx.distortionModel, 'softClip');
+  const setParam = smooth
+    ? (param, value) => setAudioParamSmooth(param, value, ctx)
+    : (param, value) => { if (param) param.value = value; };
+
+  if (drumsRouting.output?.gain) setParam(drumsRouting.output.gain, clampNumber(mixer.drumsVolume, 0.9, 0, 1));
+  if (drumsRouting.distortionInput?.gain) setParam(drumsRouting.distortionInput.gain, 1 + effectiveDrive * 2.2);
+  if (drumsRouting.dry?.gain) setParam(drumsRouting.dry.gain, Math.max(0, 1 - reverbMix));
+  if (drumsRouting.wet?.gain) setParam(drumsRouting.wet.gain, reverbMix);
+
+  if (drumsRouting.distortion) {
+    drumsRouting.distortion.curve = effectiveDrive > 0.001 ? getDrumDistortionCurve(model, effectiveDrive) : null;
+    drumsRouting.distortion.oversample = '2x';
+  }
+  if (drumsRouting.reverb) {
+    const seconds = getDrumReverbImpulseSeconds(reverbSize);
+    const decay = getDrumReverbImpulseDecay(reverbDecay);
+    const key = `${Math.round(seconds * 1000)}:${Math.round(decay * 1000)}`;
+    if (drumsRouting.reverbSpecKey !== key) {
+      drumsRouting.reverb.buffer = createImpulseResponseForContext(ctx, seconds, decay);
+      drumsRouting.reverbSpecKey = key;
+    }
+  }
 }
 
 function applyOfflineMixSettings(routing) {
@@ -2575,7 +2684,7 @@ function applyOfflineMixSettings(routing) {
   setBus('chord', mixer.chordVolume, reverb.chordWet, song.chordSynth);
   setBus('bass', mixer.bassVolume, reverb.bassWet, song.bassSynth);
   setBus('string', mixer.stringVolume, reverb.stringWet, song.stringSynth);
-  routing.drums.output.gain.value = clampNumber(mixer.drumsVolume, 0.9, 0, 1);
+  applyDrumFxSettingsToRouting(routing.drums, routing.master.context, false);
 }
 
 function createNoiseBufferForContext(ctx, cache, duration) {
@@ -3143,16 +3252,7 @@ function getAudioCtx() {
 
 function createImpulseResponse(seconds = 1.8, decay = 2.2) {
   const ctx = getAudioCtx();
-  const length = Math.floor(ctx.sampleRate * seconds);
-  const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
-  for (let channel = 0; channel < impulse.numberOfChannels; channel++) {
-    const data = impulse.getChannelData(channel);
-    for (let index = 0; index < length; index++) {
-      const t = index / Math.max(1, length - 1);
-      data[index] = (Math.random() * 2 - 1) * Math.pow(1 - t, decay);
-    }
-  }
-  return impulse;
+  return createImpulseResponseForContext(ctx, seconds, decay);
 }
 
 function getDelayFeelMultiplier(feel) {
@@ -3166,6 +3266,16 @@ function getDelayTimeSeconds(synthSettings) {
   const subdivision = normalizeDelaySubdivision(synthSettings?.delaySubdivisionBeats, 0.5);
   const feel = normalizeDelayFeel(synthSettings?.delayFeel, 'straight');
   return (60 / bpm) * subdivision * getDelayFeelMultiplier(feel);
+}
+
+function getDrumReverbImpulseSeconds(size) {
+  const normalized = clampNumber(size, 0.35, 0, 1);
+  return 0.25 + normalized * 2.75;
+}
+
+function getDrumReverbImpulseDecay(decay) {
+  const normalized = clampNumber(decay, 0.45, 0, 1);
+  return 0.8 + normalized * 4.2;
 }
 
 function getLfoShapeAmount(shape, phase) {
@@ -3308,14 +3418,34 @@ function setupAudioRouting() {
   };
 
   const drumsGain = ctx.createGain();
-  drumsGain.connect(master);
+  const drumsDistortionInput = ctx.createGain();
+  const drumsDistortion = ctx.createWaveShaper();
+  const drumsReverb = ctx.createConvolver();
+  const drumsDry = ctx.createGain();
+  const drumsWet = ctx.createGain();
+  drumsGain.connect(drumsDistortionInput);
+  drumsDistortionInput.connect(drumsDistortion);
+  drumsDistortion.connect(drumsDry);
+  drumsDistortion.connect(drumsReverb);
+  drumsReverb.connect(drumsWet);
+  drumsDry.connect(master);
+  drumsWet.connect(master);
 
   audioRouting = {
     master,
     chord: makeInstrumentBus(),
     bass: makeInstrumentBus(),
     string: makeInstrumentBus(),
-    drums: { input: drumsGain, output: drumsGain },
+    drums: {
+      input: drumsGain,
+      distortionInput: drumsDistortionInput,
+      distortion: drumsDistortion,
+      reverb: drumsReverb,
+      dry: drumsDry,
+      wet: drumsWet,
+      output: drumsGain,
+      reverbSpecKey: '',
+    },
   };
   applyAudioMixSettings();
 }
@@ -3349,9 +3479,7 @@ function applyAudioMixSettings() {
   setBus('chord', mixer.chordVolume, reverb.chordWet, song.chordSynth);
   setBus('bass', mixer.bassVolume, reverb.bassWet, song.bassSynth);
   setBus('string', mixer.stringVolume, reverb.stringWet, song.stringSynth);
-  if (audioRouting.drums) {
-    setAudioParamSmooth(audioRouting.drums.output.gain, clampNumber(mixer.drumsVolume, 0.9, 0, 1));
-  }
+  applyDrumFxSettingsToRouting(audioRouting.drums, audioCtx, true);
 }
 
 function debugLog(message, level = 'info') {
@@ -3750,6 +3878,42 @@ function getDistortionCurve(amount) {
     curve[i] = ((3 + k) * x * 20 * (Math.PI / 180)) / (Math.PI + k * Math.abs(x));
   }
   distortionCurveCache.set(key, curve);
+  return curve;
+}
+
+const drumDistortionCurveCache = new Map();
+function getDrumDistortionCurve(model, amount) {
+  const normalizedAmount = clampNumber(amount, 0, 0, 1);
+  const resolvedModel = normalizeDrumDistortionModel(model, 'softClip');
+  const key = `${resolvedModel}:${Math.round(normalizedAmount * 1000)}`;
+  if (drumDistortionCurveCache.has(key)) return drumDistortionCurveCache.get(key);
+  const samples = 4096;
+  const curve = new Float32Array(samples);
+  const drive = 0.05 + normalizedAmount * 4;
+  for (let i = 0; i < samples; i++) {
+    const x = (i * 2) / (samples - 1) - 1;
+    let y = x;
+    if (resolvedModel === 'hardClip') {
+      const threshold = Math.max(0.08, 1 - normalizedAmount * 0.92);
+      y = Math.max(-threshold, Math.min(threshold, x));
+      y /= threshold;
+    } else if (resolvedModel === 'foldback') {
+      const threshold = Math.max(0.08, 1 - normalizedAmount * 0.9);
+      const folded = Math.abs(((x + threshold) % (4 * threshold)) - 2 * threshold) - threshold;
+      y = folded / threshold;
+    } else if (resolvedModel === 'tube') {
+      const pre = x * (1 + normalizedAmount * 4.5);
+      y = pre < 0
+        ? Math.tanh(pre * (0.9 + normalizedAmount * 0.4))
+        : Math.tanh(pre * (0.55 + normalizedAmount * 0.2));
+    } else {
+      y = Math.tanh(x * drive);
+      const norm = Math.tanh(drive) || 1;
+      y /= norm;
+    }
+    curve[i] = Math.max(-1, Math.min(1, y));
+  }
+  drumDistortionCurveCache.set(key, curve);
   return curve;
 }
 
@@ -4416,6 +4580,8 @@ function renderDrumSequencer() {
 
   controlsRow.append(patternLabel, nameLabel, patternCopyButton, patternPasteButton, patternSaveNewButton);
 
+  const drumFx = buildDrumFxControls();
+
   // Grid container
   const grid = document.createElement('div');
   grid.className = 'drum-seq-grid';
@@ -4474,7 +4640,7 @@ function renderDrumSequencer() {
     grid.appendChild(row);
   });
 
-  panel.append(header, controlsRow, grid);
+  panel.append(header, controlsRow, drumFx, grid);
 }
 
 function render({ preservePlaybackCursor = false } = {}) {
@@ -4514,7 +4680,7 @@ function renderMixerPanel() {
   title.textContent = 'Mixer';
   const help = document.createElement('p');
   help.className = 'mixer-help';
-  help.textContent = 'Balance chord, bass, string, and drum levels. Reverb wet/dry is per instrument in each synth card.';
+  help.textContent = 'Balance chord, bass, string, and drum levels. Drum-machine-only distortion/reverb is in the Drum Sequencer panel.';
 
   const controls = document.createElement('div');
   controls.className = 'mixer-controls';
@@ -4555,6 +4721,118 @@ function buildMixerSlider(labelText, value, onInput) {
 
   wrap.append(top, input);
   return wrap;
+}
+
+function buildDrumFxControls() {
+  const drumFx = song.drumFx || {};
+  const wrap = document.createElement('div');
+  wrap.className = 'drum-fx-controls';
+
+  const title = document.createElement('div');
+  title.className = 'drum-fx-title';
+  title.textContent = 'Drum FX (drum machine only)';
+
+  const distortionCard = document.createElement('div');
+  distortionCard.className = 'drum-fx-card';
+  const distortionTop = document.createElement('div');
+  distortionTop.className = 'drum-fx-card-top';
+  const distortionLabel = document.createElement('span');
+  distortionLabel.textContent = 'Distortion';
+  const distortionEnabledLabel = document.createElement('label');
+  distortionEnabledLabel.className = 'checkbox-inline';
+  const distortionEnabledInput = document.createElement('input');
+  distortionEnabledInput.type = 'checkbox';
+  distortionEnabledInput.checked = Boolean(drumFx.distortionEnabled);
+  distortionEnabledInput.setAttribute('aria-label', 'Drum distortion enabled');
+  distortionEnabledInput.addEventListener('change', () => updateDrumFxField('distortionEnabled', distortionEnabledInput.checked));
+  distortionEnabledLabel.append(distortionEnabledInput, document.createTextNode('On'));
+  distortionTop.append(distortionLabel, distortionEnabledLabel);
+
+  const distortionGrid = document.createElement('div');
+  distortionGrid.className = 'drum-fx-card-grid';
+  distortionGrid.append(
+    buildSynthSelectControl(
+      'Model',
+      normalizeDrumDistortionModel(drumFx.distortionModel, 'softClip'),
+      DRUM_DISTORTION_MODELS,
+      'Drum distortion model',
+      value => updateDrumFxField('distortionModel', value),
+    ),
+    buildDrumFxSlider(
+      'Drive',
+      drumFx.distortionDrive,
+      value => `${Math.round(value * 100)}%`,
+      'Drum distortion drive',
+      value => updateDrumFxField('distortionDrive', value),
+    ),
+  );
+  distortionCard.append(distortionTop, distortionGrid);
+
+  const reverbCard = document.createElement('div');
+  reverbCard.className = 'drum-fx-card';
+  const reverbTop = document.createElement('div');
+  reverbTop.className = 'drum-fx-card-top';
+  const reverbLabel = document.createElement('span');
+  reverbLabel.textContent = 'Reverb (end of drum chain)';
+  reverbTop.append(reverbLabel);
+  const reverbGrid = document.createElement('div');
+  reverbGrid.className = 'drum-fx-card-grid';
+  reverbGrid.append(
+    buildDrumFxSlider(
+      'Mix',
+      drumFx.reverbMix,
+      value => `${Math.round(value * 100)}%`,
+      'Drum reverb mix',
+      value => updateDrumFxField('reverbMix', value),
+    ),
+    buildDrumFxSlider(
+      'Size',
+      drumFx.reverbSize,
+      value => `${Math.round(value * 100)}%`,
+      'Drum reverb size',
+      value => updateDrumFxField('reverbSize', value),
+    ),
+    buildDrumFxSlider(
+      'Decay',
+      drumFx.reverbDecay,
+      value => `${Math.round(value * 100)}%`,
+      'Drum reverb decay',
+      value => updateDrumFxField('reverbDecay', value),
+    ),
+  );
+  reverbCard.append(reverbTop, reverbGrid);
+
+  wrap.append(title, distortionCard, reverbCard);
+  return wrap;
+}
+
+function buildDrumFxSlider(labelText, value, format, ariaLabel, onInput) {
+  const row = document.createElement('label');
+  row.className = 'synth-slider';
+  const top = document.createElement('div');
+  top.className = 'synth-slider-top';
+  const label = document.createElement('span');
+  label.textContent = labelText;
+  const valueText = document.createElement('span');
+  valueText.className = 'synth-slider-value';
+  const clamped = clampNumber(value, 0, 0, 1);
+  valueText.textContent = format(clamped);
+  top.append(label, valueText);
+
+  const input = document.createElement('input');
+  input.type = 'range';
+  input.min = '0';
+  input.max = '1';
+  input.step = '0.01';
+  input.value = String(clamped);
+  input.setAttribute('aria-label', ariaLabel);
+  input.addEventListener('input', () => {
+    const next = clampNumber(input.value, clamped, 0, 1);
+    valueText.textContent = format(next);
+    onInput(next);
+  });
+  row.append(top, input);
+  return row;
 }
 
 function renderArrangerPanel() {
