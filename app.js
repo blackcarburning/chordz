@@ -617,9 +617,12 @@ function normalizeStartBeat(value, fallback = 1) {
   return clampInt(value, fallback, 1, 4);
 }
 
-function createChord(root = DEFAULT_CHORD_ROOT, type = 'maj', drumPatternId = null, lfoPatternId = null) {
+function createChord(root = DEFAULT_CHORD_ROOT, type = 'maj', drumPatternId = null, lfoPatternId = null, lfoAssignments = null) {
   const normalizedRoot = normalizeSemitone(root, DEFAULT_CHORD_ROOT);
   const normalizedType = CHORD_TYPES.some(entry => entry.name === type) ? type : 'maj';
+  const chordLfoPatternId = typeof lfoAssignments?.chord === 'string' ? lfoAssignments.chord : lfoPatternId;
+  const bassLfoPatternId = typeof lfoAssignments?.bass === 'string' ? lfoAssignments.bass : lfoPatternId;
+  const stringLfoPatternId = typeof lfoAssignments?.string === 'string' ? lfoAssignments.string : lfoPatternId;
   return {
     id: makeId(),
     root: normalizedRoot,
@@ -636,6 +639,9 @@ function createChord(root = DEFAULT_CHORD_ROOT, type = 'maj', drumPatternId = nu
     arpMode: 'off',
     drumPatternId,
     lfoPatternId,
+    chordLfoPatternId,
+    bassLfoPatternId,
+    stringLfoPatternId,
   };
 }
 
@@ -726,10 +732,21 @@ function sampleLfoPointY(points, x) {
   if (points.length === 1) return clampNumber(points[0]?.y, 1, 0, 1);
   if (clampedX <= points[0].x) return points[0].y;
   if (clampedX >= points[points.length - 1].x) return points[points.length - 1].y;
+  const xEpsilon = 0.000001;
   for (let index = 1; index < points.length; index++) {
     const prev = points[index - 1];
     const next = points[index];
-    if (clampedX > next.x) continue;
+    if (clampedX > next.x + xEpsilon) continue;
+    if (Math.abs(clampedX - next.x) <= xEpsilon) {
+      let finalIndex = index;
+      while (
+        finalIndex + 1 < points.length
+        && Math.abs(points[finalIndex + 1].x - next.x) <= xEpsilon
+      ) {
+        finalIndex += 1;
+      }
+      return clampNumber(points[finalIndex].y, 1, 0, 1);
+    }
     const span = Math.max(0.000001, next.x - prev.x);
     const mix = (clampedX - prev.x) / span;
     return prev.y + (next.y - prev.y) * mix;
@@ -750,26 +767,17 @@ function normalizeLfoCustomPoints(rawPoints, fallback = null) {
       .filter(point => Number.isFinite(point.x) && Number.isFinite(point.y))
       .sort((a, b) => a.x - b.x)
     : [];
-  const deduped = [];
-  parsed.forEach(point => {
-    const previous = deduped[deduped.length - 1];
-    if (previous && Math.abs(previous.x - point.x) < 0.0005) deduped[deduped.length - 1] = point;
-    else deduped.push(point);
-  });
-  const source = deduped.length >= 2 ? deduped : normalizeLfoCustomPoints(fallbackPoints, null);
+  const source = parsed.length >= 2 ? parsed : normalizeLfoCustomPoints(fallbackPoints, null);
+  if (!source.length) return createDefaultLfoCustomPoints();
   const first = source[0];
   const last = source[source.length - 1];
   const withBounds = source.slice();
   if (first.x > 0) withBounds.unshift({ x: 0, y: first.y });
   if (last.x < 1) withBounds.push({ x: 1, y: last.y });
-  const maxIndex = Math.max(1, LFO_CUSTOM_POINT_COUNT - 1);
-  return Array.from({ length: LFO_CUSTOM_POINT_COUNT }, (_, index) => {
-    const x = index / maxIndex;
-    return {
-      x,
-      y: clampNumber(sampleLfoPointY(withBounds, x), 1, 0, 1),
-    };
-  });
+  return withBounds.map(point => ({
+    x: clampNumber(point.x, 0, 0, 1),
+    y: clampNumber(point.y, 1, 0, 1),
+  }));
 }
 
 function normalizeLfoPattern(raw, index = 0) {
@@ -923,7 +931,18 @@ function getChordDrumPatternId(chord, fallback = getDefaultDrumPatternId()) {
 }
 
 function getChordLfoPatternId(chord, fallback = getDefaultLfoPatternId()) {
-  return getValidLfoPatternId(chord?.lfoPatternId, fallback);
+  return getChordPartLfoPatternId(chord, 'chord', fallback);
+}
+
+function getChordPartLfoPatternId(chord, kind = 'chord', fallback = getDefaultLfoPatternId()) {
+  const key = kind === 'bass'
+    ? 'bassLfoPatternId'
+    : kind === 'string'
+      ? 'stringLfoPatternId'
+      : 'chordLfoPatternId';
+  const partPatternId = getValidLfoPatternId(chord?.[key], null);
+  const legacyPatternId = getValidLfoPatternId(chord?.lfoPatternId, fallback);
+  return partPatternId || legacyPatternId;
 }
 
 function refreshDrumPatternOptionLabels(patternId, name) {
@@ -940,7 +959,15 @@ function refreshLfoPatternOptionLabels(patternId, name) {
 
 function cloneChordForClipboard(chord) {
   if (!chord) return null;
-  const { id, drumPatternId, lfoPatternId, ...copied } = normalizeChord(chord, getDefaultDrumPatternId(), getDefaultLfoPatternId());
+  const {
+    id,
+    drumPatternId,
+    lfoPatternId,
+    chordLfoPatternId,
+    bassLfoPatternId,
+    stringLfoPatternId,
+    ...copied
+  } = normalizeChord(chord, getDefaultDrumPatternId(), getDefaultLfoPatternId());
   return deepClone(copied);
 }
 
@@ -1039,6 +1066,9 @@ function normalizeChord(rawChord, fallbackDrumPatternId = null, fallbackLfoPatte
   const type = CHORD_TYPES.some(entry => entry.name === chord.type) ? chord.type : 'maj';
   const defaultNoteCount = clampInt(chordTypeObj(type).intervals.length, 3, 1, 16);
   const chordRepeat = normalizeRepeat(chord.chordRepeat, 1);
+  const legacyLfoPatternId = typeof chord.lfoPatternId === 'string' && chord.lfoPatternId.trim()
+    ? chord.lfoPatternId
+    : fallbackLfoPatternId;
   return {
     id: chord.id || makeId(),
     root: normalizedRoot,
@@ -1056,9 +1086,16 @@ function normalizeChord(rawChord, fallbackDrumPatternId = null, fallbackLfoPatte
     drumPatternId: typeof chord.drumPatternId === 'string' && chord.drumPatternId.trim()
       ? chord.drumPatternId
       : fallbackDrumPatternId,
-    lfoPatternId: typeof chord.lfoPatternId === 'string' && chord.lfoPatternId.trim()
-      ? chord.lfoPatternId
-      : fallbackLfoPatternId,
+    lfoPatternId: legacyLfoPatternId,
+    chordLfoPatternId: typeof chord.chordLfoPatternId === 'string' && chord.chordLfoPatternId.trim()
+      ? chord.chordLfoPatternId
+      : legacyLfoPatternId,
+    bassLfoPatternId: typeof chord.bassLfoPatternId === 'string' && chord.bassLfoPatternId.trim()
+      ? chord.bassLfoPatternId
+      : legacyLfoPatternId,
+    stringLfoPatternId: typeof chord.stringLfoPatternId === 'string' && chord.stringLfoPatternId.trim()
+      ? chord.stringLfoPatternId
+      : legacyLfoPatternId,
   };
 }
 
@@ -1101,9 +1138,19 @@ function normalizeSong(rawSong) {
       return {
         ...normalized,
         chords: normalized.chords.map(chord => ({
-          ...chord,
-          drumPatternId: validPatternIds.has(chord.drumPatternId) ? chord.drumPatternId : legacyPatternId,
-          lfoPatternId: validLfoPatternIds.has(chord.lfoPatternId) ? chord.lfoPatternId : legacyLfoPatternId,
+          ...(() => {
+            const resolvedDrumPatternId = validPatternIds.has(chord.drumPatternId) ? chord.drumPatternId : legacyPatternId;
+            const resolvedLegacyLfoPatternId = validLfoPatternIds.has(chord.lfoPatternId) ? chord.lfoPatternId : legacyLfoPatternId;
+            const resolvePartLfoPatternId = value => validLfoPatternIds.has(value) ? value : resolvedLegacyLfoPatternId;
+            return {
+              ...chord,
+              drumPatternId: resolvedDrumPatternId,
+              lfoPatternId: resolvedLegacyLfoPatternId,
+              chordLfoPatternId: resolvePartLfoPatternId(chord.chordLfoPatternId),
+              bassLfoPatternId: resolvePartLfoPatternId(chord.bassLfoPatternId),
+              stringLfoPatternId: resolvePartLfoPatternId(chord.stringLfoPatternId),
+            };
+          })(),
         })),
       };
     });
@@ -1526,8 +1573,20 @@ function addChord(sectionId) {
   const section = song.sections.find(entry => entry.id === sectionId);
   if (!section) return;
   const inheritedPatternId = getChordDrumPatternId(section.chords[section.chords.length - 1], getDefaultDrumPatternId());
-  const inheritedLfoPatternId = getChordLfoPatternId(section.chords[section.chords.length - 1], getDefaultLfoPatternId());
-  section.chords.push(createChord(DEFAULT_CHORD_ROOT, 'maj', inheritedPatternId, inheritedLfoPatternId));
+  const inheritedLfoPatternId = getChordPartLfoPatternId(section.chords[section.chords.length - 1], 'chord', getDefaultLfoPatternId());
+  const inheritedBassLfoPatternId = getChordPartLfoPatternId(section.chords[section.chords.length - 1], 'bass', inheritedLfoPatternId);
+  const inheritedStringLfoPatternId = getChordPartLfoPatternId(section.chords[section.chords.length - 1], 'string', inheritedLfoPatternId);
+  section.chords.push(createChord(
+    DEFAULT_CHORD_ROOT,
+    'maj',
+    inheritedPatternId,
+    inheritedLfoPatternId,
+    {
+      chord: inheritedLfoPatternId,
+      bass: inheritedBassLfoPatternId,
+      string: inheritedStringLfoPatternId,
+    },
+  ));
   commitSong({ rerender: true, refreshCursor: true });
 }
 
@@ -1851,11 +1910,20 @@ function selectEditLfoPattern(patternId) {
   renderSynthRack();
 }
 
-function updateChordLfoPattern(sectionId, chordId, patternId) {
+function updateChordLfoPattern(sectionId, chordId, kindOrPatternId, maybePatternId) {
+  const kind = maybePatternId === undefined
+    ? 'chord'
+    : (kindOrPatternId === 'bass' || kindOrPatternId === 'string' ? kindOrPatternId : 'chord');
+  const patternId = maybePatternId === undefined ? kindOrPatternId : maybePatternId;
   const resolvedPatternId = getValidLfoPatternId(patternId);
   if (!resolvedPatternId) return;
   mutateChord(sectionId, chordId, chord => {
-    chord.lfoPatternId = resolvedPatternId;
+    if (kind === 'bass') chord.bassLfoPatternId = resolvedPatternId;
+    else if (kind === 'string') chord.stringLfoPatternId = resolvedPatternId;
+    else {
+      chord.lfoPatternId = resolvedPatternId;
+      chord.chordLfoPatternId = resolvedPatternId;
+    }
   }, { refreshCursor: true });
   editingLfoPatternId = resolvedPatternId;
   renderSynthRack();
@@ -1873,17 +1941,25 @@ function pasteChordConfiguration(sectionId, chordId) {
   mutateChord(sectionId, chordId, chord => {
     const targetId = chord.id;
     const targetPatternId = getChordDrumPatternId(chord, getDefaultDrumPatternId());
-    const targetLfoPatternId = getChordLfoPatternId(chord, getDefaultLfoPatternId());
+    const targetChordLfoPatternId = getChordPartLfoPatternId(chord, 'chord', getDefaultLfoPatternId());
+    const targetBassLfoPatternId = getChordPartLfoPatternId(chord, 'bass', targetChordLfoPatternId);
+    const targetStringLfoPatternId = getChordPartLfoPatternId(chord, 'string', targetChordLfoPatternId);
     const pasted = normalizeChord({
       ...deepClone(copiedChordConfig),
       id: targetId,
       drumPatternId: targetPatternId,
-      lfoPatternId: targetLfoPatternId,
-    }, targetPatternId, targetLfoPatternId);
+      lfoPatternId: targetChordLfoPatternId,
+      chordLfoPatternId: targetChordLfoPatternId,
+      bassLfoPatternId: targetBassLfoPatternId,
+      stringLfoPatternId: targetStringLfoPatternId,
+    }, targetPatternId, targetChordLfoPatternId);
     Object.assign(chord, pasted, {
       id: targetId,
       drumPatternId: targetPatternId,
-      lfoPatternId: targetLfoPatternId,
+      lfoPatternId: targetChordLfoPatternId,
+      chordLfoPatternId: targetChordLfoPatternId,
+      bassLfoPatternId: targetBassLfoPatternId,
+      stringLfoPatternId: targetStringLfoPatternId,
     });
   }, { rerender: true, refreshCursor: true });
 }
@@ -2260,7 +2336,11 @@ function collectSongExportEvents() {
       const chordStartBeat = getChordPlaybackStartBeat(chord, chordBeats);
       const chordNoteCount = clampInt(chord.noteCount, chordTypeObj(chord.type).intervals.length, 1, 16);
       const absoluteChordBeat = sectionStartBeat + chordBeatOffset;
-      const lfoPatternId = getChordLfoPatternId(chord, getDefaultLfoPatternId());
+      const lfoPatternIds = {
+        chord: getChordPartLfoPatternId(chord, 'chord', getDefaultLfoPatternId()),
+        bass: getChordPartLfoPatternId(chord, 'bass', getDefaultLfoPatternId()),
+        string: getChordPartLfoPatternId(chord, 'string', getDefaultLfoPatternId()),
+      };
       addHarmonicNoteEvents(events.notes.chord, {
         baseBeat: absoluteChordBeat,
         rootMidi: 60 + chord.root + getSynthTranspose(song.chordSynth),
@@ -2307,7 +2387,8 @@ function collectSongExportEvents() {
           events.lfoSteps.push({
             beat,
             transportStep: Math.round(beat * 4),
-            lfoPatternId,
+            lfoPatternId: lfoPatternIds.chord,
+            lfoPatternIds: { ...lfoPatternIds },
           });
           if (!pattern) continue;
           DRUM_LANES.forEach(lane => {
@@ -2743,7 +2824,8 @@ async function exportWAV() {
             else break;
           }
           if (bestStep) {
-            const pattern = getLfoPatternById(bestStep.lfoPatternId || getDefaultLfoPatternId());
+            const patternId = bestStep.lfoPatternIds?.[kind] || bestStep.lfoPatternId || getDefaultLfoPatternId();
+            const pattern = getLfoPatternById(patternId);
             const lfoGain = getLfoGainAtTransportStep(pattern, bestStep.transportStep);
             const modCutoff = clampNumber(baseCutoff * (1 - filterLfoDepth + filterLfoDepth * lfoGain), baseCutoff, 120, 6000);
             effectiveSynthSettings = Object.assign({}, synthSettings, { cutoff: modCutoff });
@@ -2770,7 +2852,8 @@ async function exportWAV() {
         bus.ampLfo.gain.setValueAtTime(1, 0);
         steps.forEach(step => {
           const time = startTime + beatOffsetToSeconds(step.beat);
-          const pattern = getLfoPatternById(step.lfoPatternId || getDefaultLfoPatternId());
+          const patternId = step.lfoPatternIds?.[kind] || step.lfoPatternId || getDefaultLfoPatternId();
+          const pattern = getLfoPatternById(patternId);
           const smoothing = clampNumber(pattern?.smoothing, 0.08, 0, 1);
           const rampSeconds = Math.max(0.002, Math.min(stepSeconds * 0.95, 0.004 + smoothing * stepSeconds));
           const gain = getLfoGainAtTransportStep(pattern, step.transportStep);
@@ -2954,7 +3037,7 @@ let nextNoteTime = 0;
 let currentStep = 0;
 let currentBeatStepBase = 0;
 let currentDrumPatternId = null;
-let currentLfoPatternId = null;
+let currentLfoPatternIds = { chord: null, bass: null, string: null };
 let isBeating = false;
 let songEndedPending = false;
 let playbackCursor = {
@@ -3052,21 +3135,26 @@ function getLfoGainAtTransportStep(pattern, transportStep) {
   return Math.max(0.0001, (1 - depth) + depth * amount);
 }
 
-function applyAmpLfoAtStep(time, transportStep, patternId = currentLfoPatternId) {
+function applyAmpLfoAtStep(time, transportStep, patternIds = currentLfoPatternIds) {
   if (!audioRouting) return;
-  const pattern = getLfoPatternById(patternId || getDefaultLfoPatternId());
-  const gainTarget = getLfoGainAtTransportStep(pattern, transportStep);
   const bpm = clampInt(song?.bpm, 100, 40, 300);
   const stepSeconds = (60 / bpm) / 4;
-  const smoothing = clampNumber(pattern?.smoothing, 0.08, 0, 1);
-  const rampSeconds = Math.max(0.002, Math.min(stepSeconds * 0.95, 0.004 + smoothing * stepSeconds));
+  const gainTargetByKind = {};
   ['chord', 'bass', 'string'].forEach(kind => {
+    const patternId = typeof patternIds === 'string'
+      ? patternIds
+      : patternIds?.[kind] || getDefaultLfoPatternId();
+    const pattern = getLfoPatternById(patternId || getDefaultLfoPatternId());
+    const gainTarget = getLfoGainAtTransportStep(pattern, transportStep);
+    gainTargetByKind[kind] = gainTarget;
+    const smoothing = clampNumber(pattern?.smoothing, 0.08, 0, 1);
+    const rampSeconds = Math.max(0.002, Math.min(stepSeconds * 0.95, 0.004 + smoothing * stepSeconds));
     const gainParam = audioRouting?.[kind]?.ampLfo?.gain;
     if (!gainParam) return;
     gainParam.cancelScheduledValues(time);
     gainParam.setValueAtTime(gainParam.value, time);
     gainParam.linearRampToValueAtTime(gainTarget, time + rampSeconds);
-  });
+  }); 
   // Apply filter LFO modulation to active voices
   if (audioCtx && activeAudioNodes?.size) {
     ['chord', 'bass', 'string'].forEach(kind => {
@@ -3074,6 +3162,13 @@ function applyAmpLfoAtStep(time, transportStep, patternId = currentLfoPatternId)
       if (!synth?.filterLfoEnabled) return;
       const depth = clampNumber(synth.filterLfoDepth, 0, 0, 1);
       if (depth <= 0.0001) return;
+      const gainTarget = gainTargetByKind[kind] ?? 1;
+      const patternId = typeof patternIds === 'string'
+        ? patternIds
+        : patternIds?.[kind] || getDefaultLfoPatternId();
+      const pattern = getLfoPatternById(patternId || getDefaultLfoPatternId());
+      const smoothing = clampNumber(pattern?.smoothing, 0.08, 0, 1);
+      const rampSeconds = Math.max(0.002, Math.min(stepSeconds * 0.95, 0.004 + smoothing * stepSeconds));
       const baseCutoff = clampNumber(synth.cutoff, 1200, 120, 6000);
       const modCutoff = clampNumber(baseCutoff * (1 - depth + depth * gainTarget), baseCutoff, 120, 6000);
       activeAudioNodes.forEach(entry => {
@@ -3277,7 +3372,7 @@ function flushScheduledNotes({
     currentStep = 0;
     currentBeatStepBase = getSectionSixteenthOffset(playbackCursor.beatInSection);
     currentDrumPatternId = null;
-    currentLfoPatternId = null;
+    currentLfoPatternIds = { chord: null, bass: null, string: null };
   }
   nextNoteTime = getAudioCtx().currentTime + 0.05;
   scheduler(schedulerGeneration);
@@ -4105,9 +4200,13 @@ function scheduler(generation = schedulerGeneration) {
       const section = song.sections[playbackCursor.sectionIndex];
       const chord = section?.chords?.[playbackCursor.chordIndex];
       currentDrumPatternId = getChordDrumPatternId(chord, getDefaultDrumPatternId());
-      currentLfoPatternId = getChordLfoPatternId(chord, getDefaultLfoPatternId());
+      currentLfoPatternIds = {
+        chord: getChordPartLfoPatternId(chord, 'chord', getDefaultLfoPatternId()),
+        bass: getChordPartLfoPatternId(chord, 'bass', getDefaultLfoPatternId()),
+        string: getChordPartLfoPatternId(chord, 'string', getDefaultLfoPatternId()),
+      };
     }
-    applyAmpLfoAtStep(nextNoteTime, transportStep, currentLfoPatternId);
+    applyAmpLfoAtStep(nextNoteTime, transportStep, currentLfoPatternIds);
     scheduleStep((currentBeatStepBase + beatSubdivision) % STEPS, nextNoteTime, currentDrumPatternId);
     if (beatSubdivision === 0 && isBeating) scheduleMusicalBeat(nextNoteTime);
     const secondsPerSixteenth = (60 / song.bpm) / 4;
@@ -4129,7 +4228,7 @@ function startBeat() {
   initializePlaybackCursor();
   currentBeatStepBase = getSectionSixteenthOffset(playbackCursor.beatInSection);
   currentDrumPatternId = null;
-  currentLfoPatternId = null;
+  currentLfoPatternIds = { chord: null, bass: null, string: null };
   nextNoteTime = getAudioCtx().currentTime + 0.05;
   debugLog('Playback started');
   scheduler(schedulerGeneration);
@@ -4538,7 +4637,7 @@ function buildLfoCustomShapeEditor(pattern) {
 
   const hint = document.createElement('p');
   hint.className = 'synth-subtitle';
-  hint.textContent = 'Drag a yellow handle to move it; drag elsewhere to draw freely.';
+  hint.textContent = 'Drag a yellow handle to move it in time and level; drag elsewhere to draw freely.';
 
   const gridPadding = { left: 14, right: 14, top: 10, bottom: 20 };
   let points = normalizeLfoCustomPoints(pattern.customPoints);
@@ -4660,9 +4759,18 @@ function buildLfoCustomShapeEditor(pattern) {
   let lastDrawY = null;
 
   const applyHandleDrag = event => {
+    if (activeHandleIndex < 0 || activeHandleIndex >= points.length) return;
     const normalized = eventToPoint(event);
+    const lastIndex = Math.max(0, points.length - 1);
     const targetY = clampNumber(normalized.y, 1, 0, 1);
     const nextPoints = points.map(point => ({ x: point.x, y: point.y }));
+    const previousX = activeHandleIndex > 0 ? nextPoints[activeHandleIndex - 1].x : 0;
+    const nextX = activeHandleIndex < lastIndex ? nextPoints[activeHandleIndex + 1].x : 1;
+    let targetX = nextPoints[activeHandleIndex].x;
+    if (activeHandleIndex === 0) targetX = 0;
+    else if (activeHandleIndex === lastIndex) targetX = 1;
+    else targetX = clampNumber(normalized.x, targetX, previousX, nextX);
+    nextPoints[activeHandleIndex].x = targetX;
     nextPoints[activeHandleIndex].y = targetY;
     setPoints(nextPoints);
   };
@@ -5874,26 +5982,33 @@ function buildChordCard(chord, sectionId) {
   drumPatternRow.append(drumPatternWrap, drumPatternActions);
 
   const lfoPatternRow = document.createElement('div');
-  lfoPatternRow.className = 'chord-inline-row';
-
-  const lfoPatternWrap = document.createElement('div');
-  lfoPatternWrap.className = 'repeat-field';
-  const lfoPatternLabel = document.createElement('label');
-  lfoPatternLabel.textContent = 'Amp LFO';
-  lfoPatternLabel.setAttribute('for', 'lfo-pattern-' + chord.id);
-  const lfoPatternSelect = document.createElement('select');
-  lfoPatternSelect.id = 'lfo-pattern-' + chord.id;
-  lfoPatternSelect.className = 'repeat-select';
-  lfoPatternSelect.setAttribute('aria-label', 'Amplitude LFO pattern for this chord');
-  (song.lfoPatterns || []).forEach(pattern => {
-    const option = document.createElement('option');
-    option.value = pattern.id;
-    option.textContent = pattern.name;
-    if (pattern.id === getChordLfoPatternId(chord, getDefaultLfoPatternId())) option.selected = true;
-    lfoPatternSelect.appendChild(option);
-  });
-  lfoPatternSelect.addEventListener('change', () => updateChordLfoPattern(sectionId, chord.id, lfoPatternSelect.value));
-  lfoPatternWrap.append(lfoPatternLabel, lfoPatternSelect);
+  lfoPatternRow.className = 'repeat-row';
+  const buildLfoSelectField = (labelText, controlId, kind) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'repeat-field';
+    const label = document.createElement('label');
+    label.textContent = labelText;
+    label.setAttribute('for', controlId);
+    const select = document.createElement('select');
+    select.id = controlId;
+    select.className = 'repeat-select';
+    select.setAttribute('aria-label', `${labelText} pattern for this chord`);
+    (song.lfoPatterns || []).forEach(pattern => {
+      const option = document.createElement('option');
+      option.value = pattern.id;
+      option.textContent = pattern.name;
+      if (pattern.id === getChordPartLfoPatternId(chord, kind, getDefaultLfoPatternId())) option.selected = true;
+      select.appendChild(option);
+    });
+    select.addEventListener('change', () => updateChordLfoPattern(sectionId, chord.id, kind, select.value));
+    wrap.append(label, select);
+    return wrap;
+  };
+  lfoPatternRow.append(
+    buildLfoSelectField('Chord LFO', 'lfo-pattern-chord-' + chord.id, 'chord'),
+    buildLfoSelectField('Bass LFO', 'lfo-pattern-bass-' + chord.id, 'bass'),
+    buildLfoSelectField('String LFO', 'lfo-pattern-string-' + chord.id, 'string'),
+  );
 
   const lfoPatternActions = document.createElement('div');
   lfoPatternActions.className = 'mini-action-group';
@@ -5915,7 +6030,9 @@ function buildChordCard(chord, sectionId) {
   pasteLfoButton.addEventListener('click', () => pasteLfoPatternToChord(sectionId, chord.id));
 
   lfoPatternActions.append(copyLfoButton, pasteLfoButton);
-  lfoPatternRow.append(lfoPatternWrap, lfoPatternActions);
+  const lfoRowWrap = document.createElement('div');
+  lfoRowWrap.className = 'chord-inline-row';
+  lfoRowWrap.append(lfoPatternRow, lfoPatternActions);
 
   const actionBar = document.createElement('div');
   actionBar.className = 'chord-action-bar';
@@ -5972,7 +6089,7 @@ function buildChordCard(chord, sectionId) {
     repeatRow,
     articulationRow,
     drumPatternRow,
-    lfoPatternRow,
+    lfoRowWrap,
     actionBar,
   );
   return card;
