@@ -5309,6 +5309,9 @@ function getNavigationRibbonItems() {
     { targetId: 'mixer-panel', label: 'Mix', title: 'Mixer' },
     { targetId: 'drum-sequencer-panel', label: 'Drm', title: 'Drum Machine' },
     { targetId: 'synth-rack', label: 'LFO', title: 'LFO / Custom LFO' },
+    { targetId: 'synth-panel-chord', label: 'Chrd', title: 'Chord synth' },
+    { targetId: 'synth-panel-bass', label: 'Bass', title: 'Bass synth' },
+    { targetId: 'synth-panel-string', label: 'Str', title: 'String synth' },
   ];
   song.sections.forEach((section, index) => {
     const fullLabel = (section.name || section.type || `Section ${index + 1}`).trim();
@@ -6145,6 +6148,7 @@ function buildSynthCard(kind) {
   const expanded = synthPanelExpanded[kind] !== false;
 
   const card = document.createElement('section');
+  card.id = `synth-panel-${kind}`;
   card.className = `synth-card synth-card-${kind}`;
   if (!expanded) card.classList.add('collapsed');
 
