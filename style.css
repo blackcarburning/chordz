@@ -506,6 +506,10 @@ input[type='range'] {
   gap: 0.55rem;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
 }
+.drum-fx-inline-row {
+  display: grid;
+  gap: 0.5rem;
+}
 
 .drum-seq-grid {
   display: grid;
