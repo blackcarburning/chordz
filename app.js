@@ -680,8 +680,11 @@ function createDefaultLfoPattern(index) {
 
 function normalizeDrumPatterns(rawPatterns) {
   const result = [];
-  for (let i = 0; i < DRUM_PATTERN_COUNT; i++) {
-    const raw = Array.isArray(rawPatterns) ? rawPatterns[i] : null;
+  const source = Array.isArray(rawPatterns) ? rawPatterns : [];
+  // Preserve all patterns from saved data; if empty, seed defaults
+  const count = Math.max(source.length, DRUM_PATTERN_COUNT);
+  for (let i = 0; i < count; i++) {
+    const raw = source[i];
     if (raw && typeof raw === 'object') {
       const grid = {};
       DRUM_LANES.forEach(lane => {
@@ -798,8 +801,11 @@ function normalizeLfoPattern(raw, index = 0) {
 
 function normalizeLfoPatterns(rawPatterns) {
   const result = [];
-  for (let i = 0; i < LFO_PATTERN_COUNT; i++) {
-    const raw = Array.isArray(rawPatterns) ? rawPatterns[i] : null;
+  const source = Array.isArray(rawPatterns) ? rawPatterns : [];
+  // Preserve all patterns from saved data; if empty, seed defaults
+  const count = Math.max(source.length, LFO_PATTERN_COUNT);
+  for (let i = 0; i < count; i++) {
+    const raw = source[i];
     result.push(normalizeLfoPattern(raw, i));
   }
   return result;
@@ -2038,6 +2044,35 @@ function pasteLfoPatternToChord(sectionId, chordId) {
   const patternId = getChordLfoPatternId(chord, getDefaultLfoPatternId());
   if (!patternId) return;
   pasteLfoPattern(patternId);
+}
+
+function addDrumPatternFromCurrent(sourcePatternId = editingDrumPatternId) {
+  const source = getDrumPatternById(sourcePatternId);
+  const rawName = prompt('Name for new drum pattern:', source ? source.name + ' copy' : 'New Pattern');
+  if (rawName === null) return; // cancelled
+  const name = rawName.trim() || 'New Pattern';
+  const grid = {};
+  DRUM_LANES.forEach(lane => {
+    grid[lane.key] = source ? source.grid[lane.key].slice() : Array(16).fill(0);
+  });
+  const newPattern = { id: makeId(), name, grid };
+  song.drumPatterns = [...(song.drumPatterns || []), newPattern];
+  editingDrumPatternId = newPattern.id;
+  commitSong();
+  renderDrumSequencer();
+}
+
+function addLfoPatternFromCurrent(sourcePatternId = editingLfoPatternId) {
+  const source = getLfoPatternById(sourcePatternId);
+  const rawName = prompt('Name for new LFO pattern:', source ? source.name + ' copy' : 'New LFO Pattern');
+  if (rawName === null) return; // cancelled
+  const name = rawName.trim() || 'New LFO Pattern';
+  const newPattern = normalizeLfoPattern({ ...deepClone(source || {}), id: undefined, name });
+  newPattern.id = makeId();
+  song.lfoPatterns = [...(song.lfoPatterns || []), newPattern];
+  editingLfoPatternId = newPattern.id;
+  commitSong();
+  renderSynthRack();
 }
 
 // =====================================================================
@@ -4336,7 +4371,15 @@ function renderDrumSequencer() {
   patternPasteButton.setAttribute('aria-label', 'Paste the copied drum pattern into the currently edited pattern');
   patternPasteButton.addEventListener('click', () => pasteDrumPattern(editingDrumPatternId));
 
-  controlsRow.append(patternLabel, nameLabel, patternCopyButton, patternPasteButton);
+  const patternSaveNewButton = document.createElement('button');
+  patternSaveNewButton.type = 'button';
+  patternSaveNewButton.className = 'mini-action-btn';
+  patternSaveNewButton.textContent = '+ Save as new pattern';
+  patternSaveNewButton.title = 'Save current drum pattern as a new named pattern in the list';
+  patternSaveNewButton.setAttribute('aria-label', 'Save current drum pattern as a new named pattern');
+  patternSaveNewButton.addEventListener('click', () => addDrumPatternFromCurrent(editingDrumPatternId));
+
+  controlsRow.append(patternLabel, nameLabel, patternCopyButton, patternPasteButton, patternSaveNewButton);
 
   // Grid container
   const grid = document.createElement('div');
@@ -4715,8 +4758,15 @@ function buildLfoCustomShapeEditor(pattern) {
   const setPoints = nextPoints => {
     const normalized = normalizeLfoCustomPoints(nextPoints, points);
     points = normalized;
+    const wasCustom = pattern.shape === 'custom';
     updateLfoPatternField(pattern.id, 'customPoints', normalized);
-    draw();
+    if (!wasCustom) {
+      // Auto-switch shape to custom when user draws/drags; rebuild UI to reflect
+      updateLfoPatternField(pattern.id, 'shape', 'custom');
+      renderSynthRack();
+    } else {
+      draw();
+    }
   };
 
   const eventToPoint = event => {
@@ -4905,6 +4955,14 @@ function buildLfoPatternCard() {
   nameRow.append(nameTop, nameInput);
   controlsGrid.appendChild(nameRow);
 
+  const saveNewLfoBtn = document.createElement('button');
+  saveNewLfoBtn.type = 'button';
+  saveNewLfoBtn.className = 'mini-action-btn';
+  saveNewLfoBtn.textContent = '+ Save as new LFO pattern';
+  saveNewLfoBtn.title = 'Save current LFO pattern settings as a new named pattern';
+  saveNewLfoBtn.addEventListener('click', () => addLfoPatternFromCurrent(pattern.id));
+  controlsGrid.appendChild(saveNewLfoBtn);
+
   const enabledRow = document.createElement('label');
   enabledRow.className = 'checkbox-inline synth-toggle';
   const enabledInput = document.createElement('input');
@@ -4945,9 +5003,7 @@ function buildLfoPatternCard() {
   });
 
   card.append(header, controlsGrid);
-  if (normalizeLfoShape(pattern.shape, 'sine') === 'custom') {
-    card.appendChild(buildLfoCustomShapeEditor(pattern));
-  }
+  card.appendChild(buildLfoCustomShapeEditor(pattern));
   return card;
 }
 
@@ -6263,6 +6319,83 @@ function copyDebugOutput() {
 }
 
 // =====================================================================
+// AUTOSAVE – internal localStorage + optional File System Access API
+// =====================================================================
+
+const AUTOSAVE_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+let autosaveFileHandle = null; // FileSystemFileHandle if user granted permission
+let autosaveTimer = null;
+
+function internalAutosave() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeSong(song)));
+    saveSongToLibrary(song);
+    debugLog('Autosaved to localStorage');
+  } catch (_) {
+    debugLog('Autosave failed (localStorage quota?)', 'warn');
+  }
+}
+
+async function autosaveToFile() {
+  if (!autosaveFileHandle) return;
+  try {
+    const writable = await autosaveFileHandle.createWritable();
+    const json = JSON.stringify(normalizeSong(song), null, 2);
+    await writable.write(json);
+    await writable.close();
+    debugLog('Autosaved to file: ' + autosaveFileHandle.name);
+  } catch (err) {
+    debugLog('File autosave failed: ' + (err?.message || err), 'warn');
+    if (err?.name === 'NotAllowedError') {
+      // Permission revoked – clear handle so we don't keep failing
+      autosaveFileHandle = null;
+      updateAutosaveFileButtonLabel();
+    }
+  }
+}
+
+async function chooseAutosaveFile() {
+  if (!window.showSaveFilePicker) {
+    alert('Your browser does not support the File System Access API. Use Export JSON for manual saves.');
+    return;
+  }
+  try {
+    autosaveFileHandle = await window.showSaveFilePicker({
+      suggestedName: (sanitizeFilename(song.title || 'song') || 'song') + '.autosave.chordz.json',
+      types: [{ description: 'Chordz JSON', accept: { 'application/json': ['.json'] } }],
+    });
+    updateAutosaveFileButtonLabel();
+    debugLog('Autosave file chosen: ' + autosaveFileHandle.name);
+    // Write immediately after choosing
+    await autosaveToFile();
+  } catch (err) {
+    if (err?.name !== 'AbortError') debugLog('File picker error: ' + (err?.message || err), 'warn');
+  }
+}
+
+function updateAutosaveFileButtonLabel() {
+  const btn = document.getElementById('autosave-file-btn');
+  if (!btn) return;
+  if (autosaveFileHandle) {
+    btn.textContent = '💾 Autosave file: ' + autosaveFileHandle.name;
+    btn.title = 'Click to change autosave file location';
+  } else {
+    btn.textContent = '💾 Choose autosave file…';
+    btn.title = 'Choose a file to auto-save your song to every 10 minutes (File System Access API)';
+  }
+}
+
+function runAutosaveCycle() {
+  internalAutosave();
+  if (autosaveFileHandle) autosaveToFile();
+}
+
+function startAutosaveTimer() {
+  if (autosaveTimer) clearInterval(autosaveTimer);
+  autosaveTimer = setInterval(runAutosaveCycle, AUTOSAVE_INTERVAL_MS);
+}
+
+// =====================================================================
 // EVENT LISTENERS & BOOT
 // =====================================================================
 
@@ -6317,12 +6450,33 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('transpose-down').addEventListener('click', () => transposeSong(-1));
   document.getElementById('transpose-up').addEventListener('click', () => transposeSong(1));
 
-  document.getElementById('save-btn').addEventListener('click', () => { saveSong(); showSaved(); });
+  document.getElementById('save-btn').addEventListener('click', () => {
+    // Prompt for a name when saving an untitled song
+    const titleElement = document.getElementById('song-title');
+    const currentTitle = normalizeSongTitle(titleElement ? titleElement.value : song.title);
+    if (currentTitle === 'Untitled Song') {
+      const entered = prompt('Enter a name for your song:', '');
+      if (entered !== null && entered.trim()) {
+        song.title = entered.trim();
+        if (titleElement) titleElement.value = song.title;
+      }
+    }
+    saveSong();
+    showSaved();
+  });
   document.getElementById('export-btn').addEventListener('click', exportJSON);
   document.getElementById('export-wav-btn').addEventListener('click', exportWAV);
   document.getElementById('export-midi-btn').addEventListener('click', exportMIDI);
   document.getElementById('import-btn').addEventListener('click', importJSON);
   document.getElementById('new-btn').addEventListener('click', resetSong);
+
+  const autosaveFileBtn = document.getElementById('autosave-file-btn');
+  if (autosaveFileBtn) {
+    autosaveFileBtn.addEventListener('click', chooseAutosaveFile);
+    updateAutosaveFileButtonLabel();
+  }
+
+  startAutosaveTimer();
 
   document.getElementById('add-section-btn').addEventListener('click', () => {
     const type = document.getElementById('section-type-select').value;
