@@ -963,6 +963,39 @@ function refreshLfoPatternOptionLabels(patternId, name) {
   });
 }
 
+function refreshAllChordDrumDropdowns() {
+  const patterns = song.drumPatterns || [];
+  document.querySelectorAll('select[id^="drum-pattern-"]').forEach(select => {
+    if (select.id === 'drum-pattern-select') return; // skip the sequencer editor selector
+    const currentValue = select.value;
+    select.innerHTML = '';
+    patterns.forEach(pattern => {
+      const option = document.createElement('option');
+      option.value = pattern.id;
+      option.textContent = pattern.name;
+      if (pattern.id === currentValue) option.selected = true;
+      select.appendChild(option);
+    });
+  });
+}
+
+function refreshAllChordLfoDropdowns() {
+  const patterns = song.lfoPatterns || [];
+  ['lfo-pattern-chord-', 'lfo-pattern-bass-', 'lfo-pattern-string-'].forEach(prefix => {
+    document.querySelectorAll(`select[id^="${prefix}"]`).forEach(select => {
+      const currentValue = select.value;
+      select.innerHTML = '';
+      patterns.forEach(pattern => {
+        const option = document.createElement('option');
+        option.value = pattern.id;
+        option.textContent = pattern.name;
+        if (pattern.id === currentValue) option.selected = true;
+        select.appendChild(option);
+      });
+    });
+  });
+}
+
 function cloneChordForClipboard(chord) {
   if (!chord) return null;
   const {
@@ -2060,6 +2093,7 @@ function addDrumPatternFromCurrent(sourcePatternId = editingDrumPatternId) {
   editingDrumPatternId = newPattern.id;
   commitSong();
   renderDrumSequencer();
+  refreshAllChordDrumDropdowns();
 }
 
 function addLfoPatternFromCurrent(sourcePatternId = editingLfoPatternId) {
@@ -2073,6 +2107,7 @@ function addLfoPatternFromCurrent(sourcePatternId = editingLfoPatternId) {
   editingLfoPatternId = newPattern.id;
   commitSong();
   renderSynthRack();
+  refreshAllChordLfoDropdowns();
 }
 
 // =====================================================================
