@@ -21,6 +21,7 @@ A browser-based, dependency-free web app for building chord progressions and son
 * **Collapsible synth controls** – Chord and bass synth panels can be collapsed/expanded to keep the interface tidy without losing settings.
 * **Per-instrument reverb wet/dry** – Chord and bass synth cards each include a dedicated reverb wet control so ambience can be shaped independently.
 * **Mixer section** – Dedicated mixer controls for chord level, bass level, **drum level**, and overall output level. The Drums slider affects all drum sequencer sounds including crash and roll.
+* **Drum-machine FX chain** – Drum output has its own distortion + reverb chain (`drums → distortion → reverb → master`) with 4 distortion models, drive, and reverb mix/size/decay controls in the Drum Sequencer panel.
 
 ### 🥁 8-Lane Drum Sequencer
 
