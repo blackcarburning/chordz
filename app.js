@@ -476,6 +476,8 @@ function createSynthSettings(kind, presetId) {
     delayMix: 0,
     delayFeedback: 0.25,
     delayFilterCutoff: 2800,
+    filterLfoEnabled: false,
+    filterLfoDepth: 0,
   };
   if (kind === 'string') {
     settings.osc3Type = preset.osc3Type || preset.osc1Type;
@@ -533,6 +535,8 @@ function normalizeSynthSettings(kind, rawSynth, legacyPreset) {
     delayMix: clampNumber(synth.delayMix, base.delayMix, 0, 1),
     delayFeedback: clampNumber(synth.delayFeedback, base.delayFeedback, 0, 0.88),
     delayFilterCutoff: clampNumber(synth.delayFilterCutoff, base.delayFilterCutoff, 300, 8000),
+    filterLfoEnabled: Boolean(synth.filterLfoEnabled),
+    filterLfoDepth: clampNumber(synth.filterLfoDepth, base.filterLfoDepth, 0, 1),
   };
   if (kind === 'string') {
     normalized.osc3Type = OSC_TYPES.includes(synth.osc3Type) ? synth.osc3Type : base.osc3Type;
@@ -1484,6 +1488,24 @@ function updateSynthSelectField(kind, fieldKey, value) {
   else if (fieldKey === 'delaySubdivisionBeats') synth.delaySubdivisionBeats = normalizeDelaySubdivision(Number(value), synth.delaySubdivisionBeats);
   else if (fieldKey === 'delayFeel') synth.delayFeel = normalizeDelayFeel(value, synth.delayFeel);
   else return;
+  markSynthAsCustom(kind);
+  handleSynthParameterChange();
+}
+
+function updateSynthFilterLfoField(kind, fieldKey, value) {
+  const synth = getSynthByKind(kind);
+  if (!synth) return;
+  if (fieldKey === 'filterLfoEnabled') {
+    synth.filterLfoEnabled = Boolean(value);
+    if (!synth.filterLfoEnabled) {
+      // Restore base cutoff when filter LFO is disabled
+      applySynthFilterSettingsToActiveVoices(kind);
+    }
+  } else if (fieldKey === 'filterLfoDepth') {
+    synth.filterLfoDepth = clampNumber(value, synth.filterLfoDepth, 0, 1);
+  } else {
+    return;
+  }
   markSynthAsCustom(kind);
   handleSynthParameterChange();
 }
@@ -2707,14 +2729,33 @@ async function exportWAV() {
 
     const startTime = 0.05;
     const schedulePart = (entries, synthSettings, kind) => {
+      const filterLfoEnabled = Boolean(synthSettings.filterLfoEnabled);
+      const filterLfoDepth = clampNumber(synthSettings.filterLfoDepth, 0, 0, 1);
+      const baseCutoff = clampNumber(synthSettings.cutoff, 1200, 120, 6000);
       entries.forEach(event => {
+        let effectiveSynthSettings = synthSettings;
+        if (filterLfoEnabled && filterLfoDepth > 0.0001 && exportEvents.lfoSteps.length) {
+          // Find the LFO step at or just before this note's beat
+          const noteBeat = event.beat;
+          let bestStep = exportEvents.lfoSteps[0];
+          for (const step of exportEvents.lfoSteps) {
+            if (step.beat <= noteBeat) bestStep = step;
+            else break;
+          }
+          if (bestStep) {
+            const pattern = getLfoPatternById(bestStep.lfoPatternId || getDefaultLfoPatternId());
+            const lfoGain = getLfoGainAtTransportStep(pattern, bestStep.transportStep);
+            const modCutoff = clampNumber(baseCutoff * (1 - filterLfoDepth + filterLfoDepth * lfoGain), baseCutoff, 120, 6000);
+            effectiveSynthSettings = Object.assign({}, synthSettings, { cutoff: modCutoff });
+          }
+        }
         renderSynthVoiceOffline(
           ctx,
           routing,
           frequencyFromMidi(event.midi),
           startTime + beatOffsetToSeconds(event.beat),
           Math.max(0.03, beatOffsetToSeconds(event.durationBeats)),
-          synthSettings,
+          effectiveSynthSettings,
           kind,
         );
       });
@@ -3026,6 +3067,25 @@ function applyAmpLfoAtStep(time, transportStep, patternId = currentLfoPatternId)
     gainParam.setValueAtTime(gainParam.value, time);
     gainParam.linearRampToValueAtTime(gainTarget, time + rampSeconds);
   });
+  // Apply filter LFO modulation to active voices
+  if (audioCtx && activeAudioNodes?.size) {
+    ['chord', 'bass', 'string'].forEach(kind => {
+      const synth = getSynthByKind(kind);
+      if (!synth?.filterLfoEnabled) return;
+      const depth = clampNumber(synth.filterLfoDepth, 0, 0, 1);
+      if (depth <= 0.0001) return;
+      const baseCutoff = clampNumber(synth.cutoff, 1200, 120, 6000);
+      const modCutoff = clampNumber(baseCutoff * (1 - depth + depth * gainTarget), baseCutoff, 120, 6000);
+      activeAudioNodes.forEach(entry => {
+        if (entry.kind !== 'voice' || entry.voiceKind !== kind || !entry.filterNodes?.length) return;
+        entry.filterNodes.forEach(filter => {
+          filter.frequency.cancelScheduledValues(time);
+          filter.frequency.setValueAtTime(filter.frequency.value, time);
+          filter.frequency.linearRampToValueAtTime(modCutoff, time + rampSeconds);
+        });
+      });
+    });
+  }
 }
 
 function setAudioParamSmooth(param, value, ctx = audioCtx, ramp = 0.015) {
@@ -4478,7 +4538,7 @@ function buildLfoCustomShapeEditor(pattern) {
 
   const hint = document.createElement('p');
   hint.className = 'synth-subtitle';
-  hint.textContent = 'Drag to draw amplitude over 4 beats (top = full, bottom = muted).';
+  hint.textContent = 'Drag a yellow handle to move it; drag elsewhere to draw freely.';
 
   const gridPadding = { left: 14, right: 14, top: 10, bottom: 20 };
   let points = normalizeLfoCustomPoints(pattern.customPoints);
@@ -4548,7 +4608,7 @@ function buildLfoCustomShapeEditor(pattern) {
     points.forEach(point => {
       const pos = pointToCanvas(point);
       ctx.beginPath();
-      ctx.arc(pos.x, pos.y, 3, 0, Math.PI * 2);
+      ctx.arc(pos.x, pos.y, 6, 0, Math.PI * 2);
       ctx.fill();
     });
   };
@@ -4570,52 +4630,98 @@ function buildLfoCustomShapeEditor(pattern) {
     };
   };
 
-  let drawing = false;
-  let lastIndex = null;
-  let lastY = null;
-  const paintPoint = (event, isStart = false) => {
+  const HANDLE_HIT_RADIUS = 12;
+
+  const findHandleAtEvent = event => {
+    const rect = canvas.getBoundingClientRect();
+    const px = event.clientX - rect.left;
+    const py = event.clientY - rect.top;
+    const scaleX = canvas.width / Math.max(1, rect.width);
+    const scaleY = canvas.height / Math.max(1, rect.height);
+    const cx = px * scaleX;
+    const cy = py * scaleY;
+    let bestIndex = -1;
+    let bestDist = HANDLE_HIT_RADIUS * Math.max(scaleX, scaleY);
+    points.forEach((point, index) => {
+      const pos = pointToCanvas(point);
+      const dist = Math.sqrt((cx - pos.x) ** 2 + (cy - pos.y) ** 2);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIndex = index;
+      }
+    });
+    return bestIndex;
+  };
+
+  // dragMode: null | 'handle' | 'draw'
+  let dragMode = null;
+  let activeHandleIndex = -1;
+  let lastDrawIndex = null;
+  let lastDrawY = null;
+
+  const applyHandleDrag = event => {
+    const normalized = eventToPoint(event);
+    const targetY = clampNumber(normalized.y, 1, 0, 1);
+    const nextPoints = points.map(point => ({ x: point.x, y: point.y }));
+    nextPoints[activeHandleIndex].y = targetY;
+    setPoints(nextPoints);
+  };
+
+  const applyDrawPaint = (event, isStart = false) => {
     const normalized = eventToPoint(event);
     const targetIndex = Math.max(0, Math.min(indexMax, Math.round(normalized.x * indexMax)));
     const targetY = clampNumber(normalized.y, 1, 0, 1);
     const nextPoints = points.map(point => ({ x: point.x, y: point.y }));
-    if (isStart || lastIndex === null || lastY === null) {
+    if (isStart || lastDrawIndex === null || lastDrawY === null) {
       nextPoints[targetIndex].y = targetY;
     } else {
-      const step = targetIndex >= lastIndex ? 1 : -1;
-      const steps = Math.max(1, Math.abs(targetIndex - lastIndex));
+      const step = targetIndex >= lastDrawIndex ? 1 : -1;
+      const steps = Math.max(1, Math.abs(targetIndex - lastDrawIndex));
       for (let index = 0; index <= steps; index++) {
         const offset = index * step;
-        const pointIndex = lastIndex + offset;
+        const pointIndex = lastDrawIndex + offset;
         const mix = index / steps;
-        nextPoints[pointIndex].y = clampNumber(lastY + (targetY - lastY) * mix, targetY, 0, 1);
+        nextPoints[pointIndex].y = clampNumber(lastDrawY + (targetY - lastDrawY) * mix, targetY, 0, 1);
       }
     }
-    lastIndex = targetIndex;
-    lastY = targetY;
+    lastDrawIndex = targetIndex;
+    lastDrawY = targetY;
     setPoints(nextPoints);
   };
 
   canvas.addEventListener('pointerdown', event => {
     if (event.button !== 0) return;
-    drawing = true;
-    lastIndex = null;
-    lastY = null;
     canvas.setPointerCapture(event.pointerId);
-    paintPoint(event, true);
+    const hitIndex = findHandleAtEvent(event);
+    if (hitIndex >= 0) {
+      dragMode = 'handle';
+      activeHandleIndex = hitIndex;
+      applyHandleDrag(event);
+    } else {
+      dragMode = 'draw';
+      lastDrawIndex = null;
+      lastDrawY = null;
+      applyDrawPaint(event, true);
+    }
   });
   canvas.addEventListener('pointermove', event => {
-    if (!drawing) return;
-    paintPoint(event);
+    if (!dragMode) return;
+    if (dragMode === 'handle') {
+      applyHandleDrag(event);
+    } else {
+      applyDrawPaint(event);
+    }
   });
-  const stopDrawing = event => {
-    if (!drawing) return;
-    drawing = false;
-    lastIndex = null;
-    lastY = null;
+  const stopDrag = event => {
+    if (!dragMode) return;
+    dragMode = null;
+    activeHandleIndex = -1;
+    lastDrawIndex = null;
+    lastDrawY = null;
     if (event && canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
   };
-  canvas.addEventListener('pointerup', stopDrawing);
-  canvas.addEventListener('pointercancel', stopDrawing);
+  canvas.addEventListener('pointerup', stopDrag);
+  canvas.addEventListener('pointercancel', stopDrag);
 
   resetButton.addEventListener('click', () => setPoints(createDefaultLfoCustomPoints()));
   draw();
@@ -4917,6 +5023,7 @@ function buildSynthCard(kind) {
     ));
     SYNTH_UI_FIELDS.forEach(field => controlsGrid.appendChild(buildSynthSlider(kind, synth, field)));
     controlsGrid.appendChild(buildReverbSlider(kind));
+    controlsGrid.appendChild(buildFilterLfoControls(kind, synth));
 
     card.append(detailGrid, controlsGrid);
   }
@@ -4977,6 +5084,61 @@ function buildReverbSlider(kind) {
 
   row.append(top, input);
   return row;
+}
+
+function buildFilterLfoControls(kind, synth) {
+  const wrap = document.createElement('div');
+  wrap.className = 'synth-slider filter-lfo-controls';
+  wrap.style.gridColumn = '1 / -1';
+
+  const top = document.createElement('div');
+  top.className = 'synth-slider-top';
+  const label = document.createElement('span');
+  label.textContent = 'Filter LFO';
+
+  const enabledLabel = document.createElement('label');
+  enabledLabel.className = 'checkbox-inline';
+  const enabledInput = document.createElement('input');
+  enabledInput.type = 'checkbox';
+  enabledInput.checked = Boolean(synth.filterLfoEnabled);
+  enabledInput.setAttribute('aria-label', `${kind} filter LFO enabled`);
+  enabledInput.addEventListener('change', () => {
+    updateSynthFilterLfoField(kind, 'filterLfoEnabled', enabledInput.checked);
+    depthInput.disabled = !enabledInput.checked;
+    depthValue.style.opacity = enabledInput.checked ? '' : '0.4';
+  });
+  enabledLabel.append(enabledInput, document.createTextNode('On'));
+  top.append(label, enabledLabel);
+
+  const depthRow = document.createElement('div');
+  depthRow.style.display = 'flex';
+  depthRow.style.alignItems = 'center';
+  depthRow.style.gap = '0.5rem';
+  const depthLabel = document.createElement('span');
+  depthLabel.textContent = 'Depth';
+  depthLabel.style.fontSize = '0.75rem';
+  depthLabel.style.color = 'var(--text-muted)';
+  const depthValue = document.createElement('span');
+  depthValue.className = 'synth-slider-value';
+  depthValue.textContent = `${Math.round(synth.filterLfoDepth * 100)}%`;
+  if (!synth.filterLfoEnabled) depthValue.style.opacity = '0.4';
+  const depthInput = document.createElement('input');
+  depthInput.type = 'range';
+  depthInput.min = '0';
+  depthInput.max = '1';
+  depthInput.step = '0.01';
+  depthInput.value = String(synth.filterLfoDepth);
+  depthInput.disabled = !synth.filterLfoEnabled;
+  depthInput.style.flex = '1';
+  depthInput.setAttribute('aria-label', `${kind} filter LFO depth`);
+  depthInput.addEventListener('input', () => {
+    depthValue.textContent = `${Math.round(Number(depthInput.value) * 100)}%`;
+    updateSynthFilterLfoField(kind, 'filterLfoDepth', depthInput.value);
+  });
+  depthRow.append(depthLabel, depthInput, depthValue);
+
+  wrap.append(top, depthRow);
+  return wrap;
 }
 
 function buildSynthMetaChip(labelText, valueText) {
