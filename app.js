@@ -1750,6 +1750,7 @@ function updateSectionName(id, name) {
   if (!section) return;
   section.name = name;
   commitSong();
+  renderNavigationRibbon();
   renderArrangerPanel();
 }
 
@@ -5303,6 +5304,44 @@ function renderDrumSequencer() {
   panel.append(header, controlsRow, drumFx, grid);
 }
 
+function getNavigationRibbonItems() {
+  const items = [
+    { targetId: 'mixer-panel', label: 'Mix', title: 'Mixer' },
+    { targetId: 'drum-sequencer-panel', label: 'Drm', title: 'Drum Machine' },
+    { targetId: 'synth-rack', label: 'LFO', title: 'LFO / Custom LFO' },
+  ];
+  song.sections.forEach((section, index) => {
+    const fullLabel = (section.name || section.type || `Section ${index + 1}`).trim();
+    items.push({
+      targetId: `section-${section.id}`,
+      label: fullLabel,
+      title: fullLabel,
+    });
+  });
+  return items;
+}
+
+function renderNavigationRibbon() {
+  const ribbon = document.getElementById('navigation-ribbon');
+  if (!ribbon) return;
+  ribbon.innerHTML = '';
+  const items = getNavigationRibbonItems();
+  items.forEach(item => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'navigation-ribbon-btn';
+    button.textContent = item.label;
+    button.title = item.title;
+    button.setAttribute('aria-label', `Jump to ${item.title}`);
+    button.addEventListener('click', () => {
+      const target = document.getElementById(item.targetId);
+      if (!target) return;
+      target.scrollIntoView({ block: 'start', inline: 'nearest' });
+    });
+    ribbon.appendChild(button);
+  });
+}
+
 function render({ preservePlaybackCursor = false } = {}) {
   song = normalizeSong(song);
 
@@ -5325,6 +5364,7 @@ function render({ preservePlaybackCursor = false } = {}) {
   if (!container) return;
   container.innerHTML = '';
   song.sections.forEach(section => container.appendChild(buildSection(section)));
+  renderNavigationRibbon();
   updateSectionClipboardActionState();
   updateSongGoToControl();
   updatePlaybackModeUI();
@@ -6545,6 +6585,7 @@ function renderArrangementPanel(sectionId) {
 
 function buildSection(section) {
   const container = document.createElement('div');
+  container.id = 'section-' + section.id;
   container.className = 'section';
   container.dataset.id = section.id;
   container.dataset.type = section.type;
