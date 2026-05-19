@@ -2166,6 +2166,9 @@ function addLfoPatternFromCurrent(sourcePatternId = editingLfoPatternId) {
 
 const STORAGE_KEY = 'chordz_song_v1';
 const SONG_LIBRARY_KEY = 'chordz_song_library_v1';
+const PROJECT_FILE_SCHEMA = 'chordz-project';
+const PROJECT_FILE_VERSION = 2;
+let projectFileHandle = null;
 
 function normalizeSongTitle(rawTitle) {
   if (typeof rawTitle !== 'string') return 'Untitled Song';
@@ -2288,6 +2291,143 @@ function saveSong() {
   }
 }
 
+function ensureSongTitleForSave() {
+  const titleElement = document.getElementById('song-title');
+  const currentTitle = normalizeSongTitle(titleElement ? titleElement.value : song.title);
+  if (currentTitle !== 'Untitled Song') return true;
+  const entered = prompt('Enter a name for your song/project:', '');
+  if (entered === null) return false;
+  if (entered.trim()) {
+    song.title = entered.trim();
+    if (titleElement) titleElement.value = song.title;
+  }
+  return true;
+}
+
+function serializeProject(songData = song) {
+  const normalizedSong = normalizeSong(songData);
+  return {
+    schema: PROJECT_FILE_SCHEMA,
+    version: PROJECT_FILE_VERSION,
+    savedAt: Date.now(),
+    song: normalizedSong,
+    uiState: {
+      editingDrumPatternId: getValidDrumPatternId(editingDrumPatternId, normalizedSong.drumPatterns?.[0]?.id || null),
+      editingLfoPatternId: getValidLfoPatternId(editingLfoPatternId, normalizedSong.lfoPatterns?.[0]?.id || null),
+    },
+  };
+}
+
+function normalizeProject(parsedProject) {
+  if (!parsedProject || typeof parsedProject !== 'object') throw new Error('Invalid project file format.');
+  const legacySong = Array.isArray(parsedProject.sections) ? parsedProject : null;
+  const candidateSong = legacySong || parsedProject.song;
+  if (!candidateSong || !Array.isArray(candidateSong.sections)) throw new Error('Project file does not contain song sections.');
+  const normalizedSong = normalizeSong(candidateSong);
+  return {
+    song: normalizedSong,
+    uiState: {
+      editingDrumPatternId: getValidDrumPatternId(parsedProject.uiState?.editingDrumPatternId, normalizedSong.drumPatterns?.[0]?.id || null),
+      editingLfoPatternId: getValidLfoPatternId(parsedProject.uiState?.editingLfoPatternId, normalizedSong.lfoPatterns?.[0]?.id || null),
+    },
+  };
+}
+
+function applyLoadedProject(parsedProject) {
+  const normalizedProject = normalizeProject(parsedProject);
+  song = normalizedProject.song;
+  editingDrumPatternId = normalizedProject.uiState.editingDrumPatternId;
+  editingLfoPatternId = normalizedProject.uiState.editingLfoPatternId;
+  render();
+  saveSong();
+}
+
+async function writeProjectToFileHandle(handle, json) {
+  const writable = await handle.createWritable();
+  await writable.write(json);
+  await writable.close();
+}
+
+async function saveProjectFile() {
+  if (!ensureSongTitleForSave()) return;
+  saveSong();
+  const payload = serializeProject(song);
+  const json = JSON.stringify(payload, null, 2);
+  const filename = sanitizeFilename(song.title || 'song') + '.chordz.json';
+
+  if (window.showSaveFilePicker) {
+    try {
+      if (!projectFileHandle) {
+        projectFileHandle = await window.showSaveFilePicker({
+          suggestedName: filename,
+          types: [{ description: 'Chordz Project JSON', accept: { 'application/json': ['.json'] } }],
+        });
+      }
+      await writeProjectToFileHandle(projectFileHandle, json);
+      showSavedButtonState('project-save-btn', '✓ Project saved');
+      debugLog('Saved project file: ' + (projectFileHandle?.name || filename));
+      return;
+    } catch (err) {
+      if (err?.name === 'AbortError') return;
+      if (err?.name === 'NotAllowedError') {
+        projectFileHandle = null;
+        alert('Save permission denied. Choose Save Project File… again to pick a location.');
+        return;
+      }
+      alert('Save project file failed: ' + (err?.message || err));
+      return;
+    }
+  }
+
+  const blob = new Blob([json], { type: 'application/json' });
+  downloadBlob(blob, filename);
+  showSavedButtonState('project-save-btn', '✓ Project downloaded');
+}
+
+async function loadProjectFile() {
+  const openFallbackInput = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json,.json,.chordz.json';
+    input.onchange = event => {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = loadEvent => {
+        try {
+          const parsed = JSON.parse(loadEvent.target.result);
+          applyLoadedProject(parsed);
+          projectFileHandle = null;
+        } catch (error) {
+          alert('Load project failed: ' + error.message);
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  };
+
+  if (!window.showOpenFilePicker) {
+    openFallbackInput();
+    return;
+  }
+
+  try {
+    const [handle] = await window.showOpenFilePicker({
+      multiple: false,
+      types: [{ description: 'Chordz Project JSON', accept: { 'application/json': ['.json'] } }],
+    });
+    if (!handle) return;
+    const file = await handle.getFile();
+    const parsed = JSON.parse(await file.text());
+    applyLoadedProject(parsed);
+    projectFileHandle = handle;
+  } catch (err) {
+    if (err?.name === 'AbortError') return;
+    alert('Load project failed: ' + (err?.message || err));
+  }
+}
+
 function loadSong() {
   const library = loadSongLibrary();
   const preferredId = library.lastSongId || library.songs[0]?.id || null;
@@ -2321,33 +2461,13 @@ function resetSong() {
 
 function exportJSON() {
   saveSong();
-  const json = JSON.stringify(song, null, 2);
+  const json = JSON.stringify(serializeProject(song), null, 2);
   const blob = new Blob([json], { type: 'application/json' });
   downloadBlob(blob, sanitizeFilename(song.title || 'song') + '.chordz.json');
 }
 
 function importJSON() {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = 'application/json,.json';
-  input.onchange = event => {
-    const file = event.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = loadEvent => {
-      try {
-        const parsed = JSON.parse(loadEvent.target.result);
-        if (!parsed || !Array.isArray(parsed.sections)) throw new Error('Invalid song file.');
-        song = normalizeSong(parsed);
-        render();
-        saveSong();
-      } catch (error) {
-        alert('Import failed: ' + error.message);
-      }
-    };
-    reader.readAsText(file);
-  };
-  input.click();
+  loadProjectFile();
 }
 
 function sanitizeFilename(str) {
@@ -6764,19 +6884,12 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('transpose-up').addEventListener('click', () => transposeSong(1));
 
   document.getElementById('save-btn').addEventListener('click', () => {
-    // Prompt for a name when saving an untitled song
-    const titleElement = document.getElementById('song-title');
-    const currentTitle = normalizeSongTitle(titleElement ? titleElement.value : song.title);
-    if (currentTitle === 'Untitled Song') {
-      const entered = prompt('Enter a name for your song:', '');
-      if (entered !== null && entered.trim()) {
-        song.title = entered.trim();
-        if (titleElement) titleElement.value = song.title;
-      }
-    }
+    if (!ensureSongTitleForSave()) return;
     saveSong();
     showSaved();
   });
+  document.getElementById('project-save-btn').addEventListener('click', saveProjectFile);
+  document.getElementById('project-load-btn').addEventListener('click', loadProjectFile);
   document.getElementById('export-btn').addEventListener('click', exportJSON);
   document.getElementById('export-wav-btn').addEventListener('click', exportWAV);
   document.getElementById('export-midi-btn').addEventListener('click', exportMIDI);
@@ -6798,9 +6911,14 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function showSaved() {
-  const button = document.getElementById('save-btn');
+  showSavedButtonState('save-btn', '✓ Saved');
+}
+
+function showSavedButtonState(buttonId, label = '✓ Saved') {
+  const button = document.getElementById(buttonId);
+  if (!button) return;
   const original = button.textContent;
-  button.textContent = '✓ Saved';
+  button.textContent = label;
   button.disabled = true;
   setTimeout(() => {
     button.textContent = original;
