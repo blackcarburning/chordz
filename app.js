@@ -6244,9 +6244,6 @@ function updatePlaybackModeUI() {
   const isEdit = (song.playbackMode || 'edit') === 'edit';
   const isSong = (song.playbackMode || 'edit') === 'song';
   const isLooping = (song.playbackMode || 'edit') === 'looping';
-  document.querySelectorAll('.section-play-select').forEach(element => {
-    element.style.display = isEdit ? 'inline-flex' : 'none';
-  });
   const editHelp = document.getElementById('playback-help-edit');
   const songHelp = document.getElementById('playback-help-song');
   const loopingHelp = document.getElementById('playback-help-looping');
@@ -6383,10 +6380,11 @@ function buildSectionHeader(section) {
   radio.type = 'radio';
   radio.name = 'edit-play-section';
   radio.value = section.id;
+  radio.setAttribute('aria-label', `Edit section ${section.name || section.type}`);
   radio.checked = song.selectedSectionId === section.id;
   radio.addEventListener('change', () => selectEditSection(section.id));
   const radioText = document.createElement('span');
-  radioText.textContent = 'Edit play';
+  radioText.textContent = 'Edit Section';
   playSelect.append(radio, radioText);
 
   const actions = document.createElement('div');
