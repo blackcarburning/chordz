@@ -1244,17 +1244,40 @@ function resolveSynthLfoPattern(patternId, kind = 'chord', patternIds = currentL
   return getLfoPatternById(normalizeSynthLfoPatternId(patternId, fallbackPatternId, false) || fallbackPatternId);
 }
 
+function getSynthModulationAmountAtTransportStep(pattern, transportStep) {
+  const shapeAmount = getLfoShapeValueAtTransportStep(pattern, transportStep, { respectEnabled: false });
+  const bipolarShape = clampNumber((shapeAmount * 2) - 1, 0, -1, 1);
+  const patternDepth = clampNumber(pattern?.depth, 1, 0, 1);
+  const shapeStrength = 0.65 + (patternDepth * 0.35);
+  return clampNumber(bipolarShape * shapeStrength, 0, -1, 1);
+}
+
 function applySynthLfoModulation(baseValue, kind, target, transportStep, patternIds = currentLfoPatternIds) {
-  const synth = getSynthByKind(kind);
   const config = SYNTH_LFO_TARGET_CONFIG[target];
   const modulation = getSynthLfoModulation(kind, target);
   const base = clampNumber(baseValue, config?.fallback ?? 0, config?.min ?? 0, config?.max ?? Number.MAX_SAFE_INTEGER);
-  if (!synth || !config || !modulation?.enabled) return base;
+  if (!config || !modulation?.enabled) return base;
   const depth = clampNumber(modulation.depth, 0, 0, 1);
   if (depth <= 0.0001) return base;
   const pattern = resolveSynthLfoPattern(modulation.patternId, kind, patternIds, getDefaultLfoPatternId());
-  const lfoGain = getLfoGainAtTransportStep(pattern, transportStep);
-  return clampNumber(base * (1 - depth + depth * lfoGain), base, config.min, config.max);
+  const modulationAmount = getSynthModulationAmountAtTransportStep(pattern, transportStep);
+  const depthCurve = Math.pow(depth, 0.75);
+  if (target === 'cutoff') {
+    const octaveSpan = 4 * depthCurve;
+    const value = base * Math.pow(2, modulationAmount * octaveSpan);
+    return clampNumber(value, base, config.min, config.max);
+  }
+  if (target === 'q') {
+    const qSpan = 10 * depthCurve;
+    const value = base + (modulationAmount * qSpan);
+    return clampNumber(value, base, config.min, config.max);
+  }
+  if (target === 'decay') {
+    const decayOctaveSpan = 2.8 * depthCurve;
+    const value = base * Math.pow(2, modulationAmount * decayOctaveSpan);
+    return clampNumber(value, base, config.min, config.max);
+  }
+  return base;
 }
 
 function getEffectiveSynthSettingsForTransportStep(kind, synthSettings, transportStep, patternIds = currentLfoPatternIds) {
@@ -4043,11 +4066,10 @@ function getCustomLfoShapeAmount(points, phase) {
   return clampNumber(sampleLfoPointY(points, phase), 1, 0, 1);
 }
 
-function getLfoGainAtTransportStep(pattern, transportStep) {
+function getLfoShapeValueAtTransportStep(pattern, transportStep, { respectEnabled = true } = {}) {
   const resolved = pattern || getLfoPatternById(getDefaultLfoPatternId());
-  if (!resolved || !resolved.enabled) return 1;
-  const depth = clampNumber(resolved.depth, 0, 0, 1);
-  if (depth <= 0.0001) return 1;
+  if (!resolved) return 0.5;
+  if (respectEnabled && !resolved.enabled) return 0.5;
   const feelMultiplier = getDelayFeelMultiplier(normalizeLfoTimingFeel(resolved.timingFeel, 'straight'));
   const cycleBeats = normalizeLfoRate(resolved.rateBeats, 1) * feelMultiplier;
   const cycleSteps = Math.max(0.25, cycleBeats * 4);
@@ -4063,6 +4085,16 @@ function getLfoGainAtTransportStep(pattern, transportStep) {
       phase,
     )
     : getLfoShapeAmount(shape, phase);
+  return clampNumber(amount, 0.5, 0, 1);
+}
+
+function getLfoGainAtTransportStep(pattern, transportStep, { respectEnabled = true, respectDepth = true } = {}) {
+  const resolved = pattern || getLfoPatternById(getDefaultLfoPatternId());
+  if (!resolved) return 1;
+  if (respectEnabled && !resolved.enabled) return 1;
+  const depth = respectDepth ? clampNumber(resolved.depth, 0, 0, 1) : 1;
+  if (depth <= 0.0001) return 1;
+  const amount = getLfoShapeValueAtTransportStep(resolved, transportStep, { respectEnabled: false });
   return Math.max(0.0001, (1 - depth) + depth * amount);
 }
 
@@ -6610,6 +6642,7 @@ function buildSynthLfoModulationControls(kind) {
     const targetLabel = document.createElement('span');
     targetLabel.className = 'synth-lfo-mod-target';
     targetLabel.textContent = config.label;
+    if (target === 'decay') targetLabel.title = 'Decay modulation is applied when each note starts';
 
     const enabledLabel = document.createElement('label');
     enabledLabel.className = 'checkbox-inline synth-lfo-mod-toggle';
@@ -6642,6 +6675,7 @@ function buildSynthLfoModulationControls(kind) {
     depthInput.step = '0.01';
     depthInput.value = String(clampNumber(modulation?.depth, 0, 0, 1));
     depthInput.setAttribute('aria-label', `${kind} ${config.label} LFO depth`);
+    depthInput.title = `${config.label} modulation amount`;
     const depthValue = document.createElement('span');
     depthValue.className = 'synth-slider-value';
     depthValue.textContent = `${Math.round(clampNumber(modulation?.depth, 0, 0, 1) * 100)}%`;
