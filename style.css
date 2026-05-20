@@ -765,6 +765,44 @@ input[type='range'] {
   min-width: 0;
   font-size: 0.82rem;
 }
+.synth-lfo-modulations {
+  gap: 0.55rem;
+}
+.synth-lfo-mod-grid {
+  display: grid;
+  gap: 0.45rem;
+}
+.synth-lfo-mod-row {
+  display: grid;
+  grid-template-columns: minmax(3.75rem, auto) auto minmax(0, 1.25fr) minmax(7.5rem, 1fr);
+  align-items: center;
+  gap: 0.45rem;
+}
+.synth-lfo-mod-target {
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.synth-lfo-mod-toggle {
+  white-space: nowrap;
+}
+.synth-lfo-pattern-select {
+  width: 100%;
+  min-width: 0;
+  font-size: 0.8rem;
+  padding: 0.3rem 0.45rem;
+}
+.synth-lfo-depth-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.45rem;
+}
+.synth-lfo-depth-wrap input[type='range'] {
+  width: 100%;
+}
 .lfo-custom-editor {
   margin-top: 0.75rem;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1348,6 +1386,12 @@ details[open] summary::before { transform: rotate(90deg); }
 
   .section-beat-summary { width: 100%; margin-left: 0; }
   .arrangement-lane { grid-template-columns: 1fr; }
+  .synth-lfo-mod-row {
+    grid-template-columns: minmax(3.5rem, auto) auto 1fr;
+  }
+  .synth-lfo-depth-wrap {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 640px) {

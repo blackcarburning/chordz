@@ -261,6 +261,13 @@ const LFO_TIMING_OPTIONS = [
   { value: 'dotted', label: 'Dotted' },
   { value: 'triplet', label: 'Triplet' },
 ];
+const SYNTH_LFO_PATTERN_FOLLOW_ASSIGNED = '__follow_assigned_lfo__';
+const SYNTH_LFO_TARGETS = ['cutoff', 'q', 'decay'];
+const SYNTH_LFO_TARGET_CONFIG = Object.freeze({
+  cutoff: Object.freeze({ label: 'Cutoff', fieldKey: 'cutoff', min: 120, max: 6000, fallback: 1200 }),
+  q: Object.freeze({ label: 'Q', fieldKey: 'resonance', min: 0.2, max: 12, fallback: 1 }),
+  decay: Object.freeze({ label: 'Decay', fieldKey: 'decay', min: 0.02, max: 2, fallback: 0.24 }),
+});
 const LFO_PRESET_NAMES = [
   'LFO Off', 'Pump 1/4', 'Gate 1/8',
   'Pattern 4', 'Pattern 5', 'Pattern 6', 'Pattern 7', 'Pattern 8', 'Pattern 9', 'Pattern 10',
@@ -580,7 +587,47 @@ function resolvePresetId(kind, rawPreset) {
   return library[mapped] ? mapped : getDefaultPresetId(kind);
 }
 
-function createSynthSettings(kind, presetId) {
+function createDefaultSynthLfoModulations(defaultPatternId = null) {
+  const resolvedPatternId = defaultPatternId || null;
+  return SYNTH_LFO_TARGETS.reduce((result, target) => {
+    result[target] = {
+      enabled: false,
+      patternId: resolvedPatternId,
+      depth: 0,
+    };
+    return result;
+  }, {});
+}
+
+function syncLegacySynthFilterLfoFields(synth) {
+  if (!synth) return synth;
+  const cutoffModulation = synth.lfoModulations?.cutoff || createDefaultSynthLfoModulations(null).cutoff;
+  synth.filterLfoEnabled = Boolean(cutoffModulation.enabled);
+  synth.filterLfoPatternId = cutoffModulation.patternId || getDefaultLfoPatternId();
+  synth.filterLfoDepth = clampNumber(cutoffModulation.depth, 0, 0, 1);
+  return synth;
+}
+
+function normalizeSynthLfoPatternId(patternId, fallbackPatternId = getDefaultLfoPatternId(), allowFollowAssigned = true) {
+  if (allowFollowAssigned && patternId === SYNTH_LFO_PATTERN_FOLLOW_ASSIGNED) return SYNTH_LFO_PATTERN_FOLLOW_ASSIGNED;
+  return getValidLfoPatternId(patternId, fallbackPatternId);
+}
+
+function normalizeSynthLfoModulationSettings(rawModulations, fallbackPatternId = getDefaultLfoPatternId(), allowFollowAssigned = true) {
+  const base = createDefaultSynthLfoModulations(fallbackPatternId);
+  const source = rawModulations && typeof rawModulations === 'object' ? rawModulations : {};
+  return SYNTH_LFO_TARGETS.reduce((result, target) => {
+    const rawTarget = source[target] && typeof source[target] === 'object' ? source[target] : {};
+    result[target] = {
+      enabled: Boolean(rawTarget.enabled),
+      patternId: normalizeSynthLfoPatternId(rawTarget.patternId, base[target].patternId || fallbackPatternId, allowFollowAssigned),
+      depth: clampNumber(rawTarget.depth, base[target].depth, 0, 1),
+    };
+    return result;
+  }, {});
+}
+
+function createSynthSettings(kind, presetId, defaultLfoPatternId = null) {
   const resolvedPreset = resolvePresetId(kind, presetId);
   const defaultPreset = resolvedPreset === 'custom'
     ? getDefaultPresetId(kind)
@@ -611,13 +658,15 @@ function createSynthSettings(kind, presetId) {
     delayFeedback: 0.25,
     delayFilterCutoff: 2800,
     filterLfoEnabled: false,
+    filterLfoPatternId: defaultLfoPatternId || null,
     filterLfoDepth: 0,
+    lfoModulations: createDefaultSynthLfoModulations(defaultLfoPatternId),
   };
   if (kind === 'string') {
     settings.osc3Type = preset.osc3Type || preset.osc1Type;
     settings.osc4Type = preset.osc4Type || preset.osc2Type;
   }
-  return settings;
+  return syncLegacySynthFilterLfoFields(settings);
 }
 
 function normalizeFilterPoles(value, fallback = 1) {
@@ -656,12 +705,26 @@ function normalizeDrumFilterSlope(value, fallback = 12) {
   return 12;
 }
 
-function normalizeSynthSettings(kind, rawSynth, legacyPreset) {
+function normalizeSynthSettings(kind, rawSynth, legacyPreset, fallbackLfoPatternId = getDefaultLfoPatternId()) {
   const synth = rawSynth || {};
   const presetId = resolvePresetId(kind, synth.preset || legacyPreset);
   const base = createSynthSettings(kind, presetId === 'custom'
     ? (legacyPreset || getDefaultPresetId(kind))
-    : presetId);
+    : presetId, fallbackLfoPatternId);
+  const normalizedLfoModulations = normalizeSynthLfoModulationSettings({
+    ...synth.lfoModulations,
+    ...((!synth.lfoModulations || !synth.lfoModulations.cutoff) && (synth.filterLfoEnabled !== undefined || synth.filterLfoDepth !== undefined || synth.filterLfoPatternId !== undefined)
+      ? {
+        cutoff: {
+          enabled: Boolean(synth.filterLfoEnabled),
+          patternId: synth.filterLfoPatternId === undefined
+            ? SYNTH_LFO_PATTERN_FOLLOW_ASSIGNED
+            : synth.filterLfoPatternId,
+          depth: clampNumber(synth.filterLfoDepth, base.filterLfoDepth, 0, 1),
+        },
+      }
+      : {}),
+  }, fallbackLfoPatternId, true);
 
   const normalized = {
     preset: presetId,
@@ -687,8 +750,10 @@ function normalizeSynthSettings(kind, rawSynth, legacyPreset) {
     delayMix: clampNumber(synth.delayMix, base.delayMix, 0, 1),
     delayFeedback: clampNumber(synth.delayFeedback, base.delayFeedback, 0, 0.88),
     delayFilterCutoff: clampNumber(synth.delayFilterCutoff, base.delayFilterCutoff, 300, 8000),
-    filterLfoEnabled: Boolean(synth.filterLfoEnabled),
-    filterLfoDepth: clampNumber(synth.filterLfoDepth, base.filterLfoDepth, 0, 1),
+    filterLfoEnabled: Boolean(normalizedLfoModulations.cutoff.enabled),
+    filterLfoPatternId: normalizedLfoModulations.cutoff.patternId,
+    filterLfoDepth: clampNumber(normalizedLfoModulations.cutoff.depth, base.filterLfoDepth, 0, 1),
+    lfoModulations: normalizedLfoModulations,
   };
   if (kind === 'string') {
     normalized.osc3Type = OSC_TYPES.includes(synth.osc3Type) ? synth.osc3Type : base.osc3Type;
@@ -696,7 +761,7 @@ function normalizeSynthSettings(kind, rawSynth, legacyPreset) {
   }
 
   if (presetId !== 'custom' && synth.preset === 'custom') normalized.preset = 'custom';
-  return normalized;
+  return syncLegacySynthFilterLfoFields(normalized);
 }
 
 function createSection(type, drumPatternId = null, lfoPatternId = null) {
@@ -734,13 +799,13 @@ function createDefaultSong() {
     bassPitchMode: 'linked',
     stringPitchMode: 'linked',
     chordSound: 'warmPad',
-    chordSynth: createSynthSettings('chord', 'warmPad'),
+    chordSynth: createSynthSettings('chord', 'warmPad', defaultLfoPatternId),
     bassEnabled: true,
     bassSound: 'roundBass',
-    bassSynth: createSynthSettings('bass', 'roundBass'),
+    bassSynth: createSynthSettings('bass', 'roundBass', defaultLfoPatternId),
     stringEnabled: false,
     stringSound: 'lushStrings',
-    stringSynth: createSynthSettings('string', 'lushStrings'),
+    stringSynth: createSynthSettings('string', 'lushStrings', defaultLfoPatternId),
     drumPatterns,
     lfoPatterns,
     mixer: {
@@ -1146,6 +1211,62 @@ function getLfoPatternById(patternId) {
   return patterns.find(pattern => pattern.id === resolvedId) || patterns[0];
 }
 
+function getAvailableLfoPatternOptions({ includeFollowAssigned = false, kind = 'chord' } = {}) {
+  const options = [];
+  if (includeFollowAssigned) {
+    const label = kind === 'bass'
+      ? 'Follow bass chord LFO'
+      : kind === 'string'
+        ? 'Follow string chord LFO'
+        : 'Follow chord LFO';
+    options.push({ value: SYNTH_LFO_PATTERN_FOLLOW_ASSIGNED, label });
+  }
+  (song.lfoPatterns || []).forEach(pattern => {
+    options.push({ value: pattern.id, label: pattern.name });
+  });
+  return options;
+}
+
+function getSynthLfoModulation(kind, target = 'cutoff') {
+  const synth = getSynthByKind(kind);
+  if (!synth) return null;
+  synth.lfoModulations = normalizeSynthLfoModulationSettings(synth.lfoModulations, getDefaultLfoPatternId(), true);
+  return synth.lfoModulations[target] || null;
+}
+
+function resolveSynthLfoPattern(patternId, kind = 'chord', patternIds = currentLfoPatternIds, fallbackPatternId = getDefaultLfoPatternId()) {
+  if (patternId === SYNTH_LFO_PATTERN_FOLLOW_ASSIGNED) {
+    const resolvedPatternId = typeof patternIds === 'string'
+      ? patternIds
+      : patternIds?.[kind] || fallbackPatternId;
+    return getLfoPatternById(resolvedPatternId || fallbackPatternId);
+  }
+  return getLfoPatternById(normalizeSynthLfoPatternId(patternId, fallbackPatternId, false) || fallbackPatternId);
+}
+
+function applySynthLfoModulation(baseValue, kind, target, transportStep, patternIds = currentLfoPatternIds) {
+  const synth = getSynthByKind(kind);
+  const config = SYNTH_LFO_TARGET_CONFIG[target];
+  const modulation = getSynthLfoModulation(kind, target);
+  const base = clampNumber(baseValue, config?.fallback ?? 0, config?.min ?? 0, config?.max ?? Number.MAX_SAFE_INTEGER);
+  if (!synth || !config || !modulation?.enabled) return base;
+  const depth = clampNumber(modulation.depth, 0, 0, 1);
+  if (depth <= 0.0001) return base;
+  const pattern = resolveSynthLfoPattern(modulation.patternId, kind, patternIds, getDefaultLfoPatternId());
+  const lfoGain = getLfoGainAtTransportStep(pattern, transportStep);
+  return clampNumber(base * (1 - depth + depth * lfoGain), base, config.min, config.max);
+}
+
+function getEffectiveSynthSettingsForTransportStep(kind, synthSettings, transportStep, patternIds = currentLfoPatternIds) {
+  const baseSettings = synthSettings || getSynthByKind(kind);
+  if (!baseSettings) return synthSettings;
+  const cutoff = applySynthLfoModulation(baseSettings.cutoff, kind, 'cutoff', transportStep, patternIds);
+  const resonance = applySynthLfoModulation(baseSettings.resonance, kind, 'q', transportStep, patternIds);
+  const decay = applySynthLfoModulation(baseSettings.decay, kind, 'decay', transportStep, patternIds);
+  if (cutoff === baseSettings.cutoff && resonance === baseSettings.resonance && decay === baseSettings.decay) return baseSettings;
+  return Object.assign({}, baseSettings, { cutoff, resonance, decay });
+}
+
 function getDrumFilterLfoPattern() {
   const fallbackId = getDefaultLfoPatternId();
   const patternId = getValidDrumFilterLfoPatternId(song.drumFx?.filterLfoPatternId, fallbackId);
@@ -1200,18 +1321,26 @@ function refreshAllChordDrumDropdowns() {
 }
 
 function refreshAllChordLfoDropdowns() {
-  const patterns = song.lfoPatterns || [];
-  ['lfo-pattern-chord-', 'lfo-pattern-bass-', 'lfo-pattern-string-', 'drum-filter-lfo-pattern-select'].forEach(prefix => {
+  ['lfo-pattern-chord-', 'lfo-pattern-bass-', 'lfo-pattern-string-', 'drum-filter-lfo-pattern-select', 'synth-lfo-pattern-'].forEach(prefix => {
     document.querySelectorAll(`select[id^="${prefix}"]`).forEach(select => {
       const currentValue = select.value;
+      const synthKind = select.dataset.synthKind || 'chord';
+      const includeFollowAssigned = select.dataset.includeFollowAssigned === 'true';
+      const options = getAvailableLfoPatternOptions({ includeFollowAssigned, kind: synthKind });
       select.innerHTML = '';
-      patterns.forEach(pattern => {
+      options.forEach(pattern => {
         const option = document.createElement('option');
-        option.value = pattern.id;
-        option.textContent = pattern.name;
-        if (pattern.id === currentValue) option.selected = true;
+        option.value = pattern.value;
+        option.textContent = pattern.label;
+        if (pattern.value === currentValue) option.selected = true;
         select.appendChild(option);
       });
+      if (!Array.from(select.options).some(option => option.value === currentValue)) {
+        const fallbackValue = includeFollowAssigned
+          ? normalizeSynthLfoPatternId(currentValue, getDefaultLfoPatternId(), true)
+          : getValidLfoPatternId(currentValue, getDefaultLfoPatternId());
+        select.value = fallbackValue || select.options[0]?.value || '';
+      }
     });
   });
 }
@@ -1510,13 +1639,13 @@ function normalizeSong(rawSong) {
     bassPitchMode: BASS_PITCH_MODES.includes(parsed.bassPitchMode) ? parsed.bassPitchMode : base.bassPitchMode,
     stringPitchMode: STRING_PITCH_MODES.includes(parsed.stringPitchMode) ? parsed.stringPitchMode : base.stringPitchMode,
     chordSound,
-    chordSynth: normalizeSynthSettings('chord', parsed.chordSynth, chordSound),
+    chordSynth: normalizeSynthSettings('chord', parsed.chordSynth, chordSound, defaultLfoPatternId),
     bassEnabled: parsed.bassEnabled === undefined ? base.bassEnabled : Boolean(parsed.bassEnabled),
     bassSound,
-    bassSynth: normalizeSynthSettings('bass', parsed.bassSynth, bassSound),
+    bassSynth: normalizeSynthSettings('bass', parsed.bassSynth, bassSound, defaultLfoPatternId),
     stringEnabled: parsed.stringEnabled === undefined ? base.stringEnabled : Boolean(parsed.stringEnabled),
     stringSound,
-    stringSynth: normalizeSynthSettings('string', parsed.stringSynth, stringSound),
+    stringSynth: normalizeSynthSettings('string', parsed.stringSynth, stringSound, defaultLfoPatternId),
     drumPatterns,
     lfoPatterns,
     mixer: {
@@ -1805,15 +1934,16 @@ function setPlaybackMode(mode) {
 function setSynthPreset(kind, presetId) {
   if (presetId === 'custom') return;
   const resolved = resolvePresetId(kind, presetId);
+  const defaultLfoPatternId = getDefaultLfoPatternId();
   if (kind === 'bass') {
     song.bassSound = resolved;
-    song.bassSynth = createSynthSettings('bass', resolved);
+    song.bassSynth = createSynthSettings('bass', resolved, defaultLfoPatternId);
   } else if (kind === 'string') {
     song.stringSound = resolved;
-    song.stringSynth = createSynthSettings('string', resolved);
+    song.stringSynth = createSynthSettings('string', resolved, defaultLfoPatternId);
   } else {
     song.chordSound = resolved;
-    song.chordSynth = createSynthSettings('chord', resolved);
+    song.chordSynth = createSynthSettings('chord', resolved, defaultLfoPatternId);
   }
   handleSynthParameterChange();
   renderSynthRack();
@@ -1891,22 +2021,32 @@ function updateSynthSelectField(kind, fieldKey, value) {
   handleSynthParameterChange();
 }
 
+function updateSynthLfoModulationField(kind, target, fieldKey, value) {
+  const synth = getSynthByKind(kind);
+  if (!synth || !SYNTH_LFO_TARGETS.includes(target)) return;
+  synth.lfoModulations = normalizeSynthLfoModulationSettings(synth.lfoModulations, getDefaultLfoPatternId(), true);
+  const modulation = synth.lfoModulations[target];
+  if (!modulation) return;
+  if (fieldKey === 'enabled') modulation.enabled = Boolean(value);
+  else if (fieldKey === 'patternId') modulation.patternId = normalizeSynthLfoPatternId(value, getDefaultLfoPatternId(), true);
+  else if (fieldKey === 'depth') modulation.depth = clampNumber(value, modulation.depth, 0, 1);
+  else return;
+  syncLegacySynthFilterLfoFields(synth);
+  if (target === 'cutoff' || target === 'q') applySynthFilterSettingsToActiveVoices(kind);
+  markSynthAsCustom(kind);
+  handleSynthParameterChange();
+}
+
 function updateSynthFilterLfoField(kind, fieldKey, value) {
   const synth = getSynthByKind(kind);
   if (!synth) return;
   if (fieldKey === 'filterLfoEnabled') {
-    synth.filterLfoEnabled = Boolean(value);
-    if (!synth.filterLfoEnabled) {
-      // Restore base cutoff when filter LFO is disabled
-      applySynthFilterSettingsToActiveVoices(kind);
-    }
+    updateSynthLfoModulationField(kind, 'cutoff', 'enabled', value);
   } else if (fieldKey === 'filterLfoDepth') {
-    synth.filterLfoDepth = clampNumber(value, synth.filterLfoDepth, 0, 1);
+    updateSynthLfoModulationField(kind, 'cutoff', 'depth', value);
   } else {
     return;
   }
-  markSynthAsCustom(kind);
-  handleSynthParameterChange();
 }
 
 function updateSynthWaveform(kind, fieldKey, value) {
@@ -3512,25 +3652,21 @@ async function exportWAV() {
 
     const startTime = 0.05;
     const schedulePart = (entries, synthSettings, kind) => {
-      const filterLfoEnabled = Boolean(synthSettings.filterLfoEnabled);
-      const filterLfoDepth = clampNumber(synthSettings.filterLfoDepth, 0, 0, 1);
-      const baseCutoff = clampNumber(synthSettings.cutoff, 1200, 120, 6000);
       entries.forEach(event => {
         let effectiveSynthSettings = synthSettings;
-        if (filterLfoEnabled && filterLfoDepth > 0.0001 && exportEvents.lfoSteps.length) {
-          // Find the LFO step at or just before this note's beat
-          const noteBeat = event.beat;
+        if (exportEvents.lfoSteps.length) {
           let bestStep = exportEvents.lfoSteps[0];
           for (const step of exportEvents.lfoSteps) {
-            if (step.beat <= noteBeat) bestStep = step;
+            if (step.beat <= event.beat) bestStep = step;
             else break;
           }
           if (bestStep) {
-            const patternId = bestStep.lfoPatternIds?.[kind] || bestStep.lfoPatternId || getDefaultLfoPatternId();
-            const pattern = getLfoPatternById(patternId);
-            const lfoGain = getLfoGainAtTransportStep(pattern, bestStep.transportStep);
-            const modCutoff = clampNumber(baseCutoff * (1 - filterLfoDepth + filterLfoDepth * lfoGain), baseCutoff, 120, 6000);
-            effectiveSynthSettings = Object.assign({}, synthSettings, { cutoff: modCutoff });
+            effectiveSynthSettings = getEffectiveSynthSettingsForTransportStep(
+              kind,
+              synthSettings,
+              bestStep.transportStep,
+              bestStep.lfoPatternIds || bestStep.lfoPatternId || getDefaultLfoPatternId(),
+            );
           }
         }
         renderSynthVoiceOffline(
@@ -3950,28 +4086,38 @@ function applyAmpLfoAtStep(time, transportStep, patternIds = currentLfoPatternId
     gainParam.setValueAtTime(gainParam.value, time);
     gainParam.linearRampToValueAtTime(gainTarget, time + rampSeconds);
   }); 
-  // Apply filter LFO modulation to active voices
+  // Apply synth parameter LFO modulation to active voices
   if (audioCtx && activeAudioNodes?.size) {
     ['chord', 'bass', 'string'].forEach(kind => {
-      const synth = getSynthByKind(kind);
-      if (!synth?.filterLfoEnabled) return;
-      const depth = clampNumber(synth.filterLfoDepth, 0, 0, 1);
-      if (depth <= 0.0001) return;
-      const gainTarget = gainTargetByKind[kind] ?? 1;
       const patternId = typeof patternIds === 'string'
         ? patternIds
         : patternIds?.[kind] || getDefaultLfoPatternId();
       const pattern = getLfoPatternById(patternId || getDefaultLfoPatternId());
-      const smoothing = clampNumber(pattern?.smoothing, 0.08, 0, 1);
+      const smoothingPattern = resolveSynthLfoPattern(
+        getSynthLfoModulation(kind, 'cutoff')?.enabled
+          ? getSynthLfoModulation(kind, 'cutoff')?.patternId
+          : getSynthLfoModulation(kind, 'q')?.patternId,
+        kind,
+        patternIds,
+        getDefaultLfoPatternId(),
+      ) || pattern;
+      const smoothing = clampNumber(smoothingPattern?.smoothing, 0.08, 0, 1);
       const rampSeconds = Math.max(0.002, Math.min(stepSeconds * 0.95, 0.004 + smoothing * stepSeconds));
-      const baseCutoff = clampNumber(synth.cutoff, 1200, 120, 6000);
-      const modCutoff = clampNumber(baseCutoff * (1 - depth + depth * gainTarget), baseCutoff, 120, 6000);
+      const modCutoff = applySynthLfoModulation(getSynthByKind(kind)?.cutoff, kind, 'cutoff', transportStep, patternIds);
+      const modResonance = applySynthLfoModulation(getSynthByKind(kind)?.resonance, kind, 'q', transportStep, patternIds);
       activeAudioNodes.forEach(entry => {
         if (entry.kind !== 'voice' || entry.voiceKind !== kind || !entry.filterNodes?.length) return;
+        const lastFilterIndex = entry.filterNodes.length - 1;
         entry.filterNodes.forEach(filter => {
           filter.frequency.cancelScheduledValues(time);
           filter.frequency.setValueAtTime(filter.frequency.value, time);
           filter.frequency.linearRampToValueAtTime(modCutoff, time + rampSeconds);
+        });
+        entry.filterNodes.forEach((filter, index) => {
+          const stageQ = index === lastFilterIndex ? modResonance : Math.max(0.2, modResonance * 0.5);
+          filter.Q.cancelScheduledValues(time);
+          filter.Q.setValueAtTime(filter.Q.value, time);
+          filter.Q.linearRampToValueAtTime(stageQ, time + rampSeconds);
         });
       });
     });
@@ -4212,8 +4358,8 @@ function applySynthFilterSettingsToActiveVoices(kind) {
   if (!audioCtx || !activeAudioNodes.size) return;
   const synth = getSynthByKind(kind);
   if (!synth) return;
-  const cutoff = clampNumber(synth.cutoff, 1200, 120, 6000);
-  const resonance = clampNumber(synth.resonance, 1, 0.2, 12);
+  const cutoff = applySynthLfoModulation(synth.cutoff, kind, 'cutoff', currentStep, currentLfoPatternIds);
+  const resonance = applySynthLfoModulation(synth.resonance, kind, 'q', currentStep, currentLfoPatternIds);
   activeAudioNodes.forEach(entry => {
     if (entry.kind !== 'voice' || entry.voiceKind !== kind || !entry.filterNodes?.length) return;
     const lastFilterIndex = entry.filterNodes.length - 1;
@@ -4713,7 +4859,7 @@ function buildChordIntervals(typeName, noteCount) {
   return result;
 }
 
-function playChordNotes(rootSemitone, typeName, when, beats = 4, repeats = 1, startBeat = 1, arpMode = 'off', noteCount = 3) {
+function playChordNotes(rootSemitone, typeName, when, beats = 4, repeats = 1, startBeat = 1, arpMode = 'off', noteCount = 3, transportStep = currentStep) {
   const intervals = buildChordIntervals(typeName, noteCount);
   const rootMidi = 60 + rootSemitone + getSynthTranspose(song.chordSynth);
   const totalBeats = clampInt(beats, 4, 1, 64);
@@ -4738,11 +4884,12 @@ function playChordNotes(rootSemitone, typeName, when, beats = 4, repeats = 1, st
       const remaining = blockEndTime - hitTime;
       if (remaining <= 0.01) break;
       const actualDuration = Math.min(noteDuration, Math.max(0.04, remaining * 0.95));
+      const hitTransportStep = transportStep + Math.round((startOffsetBeats + step * stepBeats) * 4);
       playSynthVoice(
         frequencyFromMidi(rootMidi + intervals[arpStepPattern[step % stepCount]]),
         hitTime,
         actualDuration,
-        song.chordSynth,
+        getEffectiveSynthSettingsForTransportStep('chord', song.chordSynth, hitTransportStep, currentLfoPatternIds),
         'chord',
       );
       step++;
@@ -4754,19 +4901,20 @@ function playChordNotes(rootSemitone, typeName, when, beats = 4, repeats = 1, st
   const hitDuration = Math.max(0.1, beatsToSeconds(hitBeats) * 0.92);
   for (let hit = 0; hit < repeatCount; hit++) {
     const hitTime = when + beatOffsetToSeconds(startOffsetBeats + hit * hitBeats);
+    const hitTransportStep = transportStep + Math.round((startOffsetBeats + hit * hitBeats) * 4);
     intervals.forEach(interval => {
       playSynthVoice(
         frequencyFromMidi(rootMidi + interval),
         hitTime,
         hitDuration,
-        song.chordSynth,
+        getEffectiveSynthSettingsForTransportStep('chord', song.chordSynth, hitTransportStep, currentLfoPatternIds),
         'chord',
       );
     });
   }
 }
 
-function playBassNote(rootSemitone, when, beats = 4, repeats = 1, startBeat = 1) {
+function playBassNote(rootSemitone, when, beats = 4, repeats = 1, startBeat = 1, transportStep = currentStep) {
   const bassMidi = 36 + rootSemitone + getSynthTranspose(song.bassSynth);
   const totalBeats = clampInt(beats, 4, 1, 64);
   const repeatCount = normalizeRepeat(repeats, 1);
@@ -4777,11 +4925,18 @@ function playBassNote(rootSemitone, when, beats = 4, repeats = 1, startBeat = 1)
   const hitDuration = Math.max(0.09, beatsToSeconds(hitBeats) * 0.9);
   for (let hit = 0; hit < repeatCount; hit++) {
     const hitTime = when + beatOffsetToSeconds(startOffsetBeats + hit * hitBeats);
-    playSynthVoice(frequencyFromMidi(bassMidi), hitTime, hitDuration, song.bassSynth, 'bass');
+    const hitTransportStep = transportStep + Math.round((startOffsetBeats + hit * hitBeats) * 4);
+    playSynthVoice(
+      frequencyFromMidi(bassMidi),
+      hitTime,
+      hitDuration,
+      getEffectiveSynthSettingsForTransportStep('bass', song.bassSynth, hitTransportStep, currentLfoPatternIds),
+      'bass',
+    );
   }
 }
 
-function playStringNotes(rootSemitone, typeName, when, beats = 4, repeats = 1, startBeat = 1, noteCount = 3) {
+function playStringNotes(rootSemitone, typeName, when, beats = 4, repeats = 1, startBeat = 1, noteCount = 3, transportStep = currentStep) {
   const intervals = buildChordIntervals(typeName, noteCount);
   if (!intervals.length) return;
   const stringMidi = 48 + rootSemitone + getSynthTranspose(song.stringSynth);
@@ -4794,12 +4949,13 @@ function playStringNotes(rootSemitone, typeName, when, beats = 4, repeats = 1, s
   const hitDuration = Math.max(0.1, beatsToSeconds(hitBeats) * 0.92);
   for (let hit = 0; hit < repeatCount; hit++) {
     const hitTime = when + beatOffsetToSeconds(startOffsetBeats + hit * hitBeats);
+    const hitTransportStep = transportStep + Math.round((startOffsetBeats + hit * hitBeats) * 4);
     intervals.forEach(interval => {
       playSynthVoice(
         frequencyFromMidi(stringMidi + interval),
         hitTime,
         hitDuration,
-        song.stringSynth,
+        getEffectiveSynthSettingsForTransportStep('string', song.stringSynth, hitTransportStep, currentLfoPatternIds),
         'string',
       );
     });
@@ -5008,7 +5164,7 @@ function advancePlaybackCursor() {
   }
 }
 
-function scheduleMusicalBeat(time) {
+function scheduleMusicalBeat(time, transportStep = currentStep) {
   if (!song.sections.length) return;
   if (usesSongTimelineMode(song.playbackMode || 'edit') && !buildSongBeatMap().length) {
     songEndedPending = true;
@@ -5030,8 +5186,8 @@ function scheduleMusicalBeat(time) {
   if (playbackCursor.beatInChord === 0) {
     const chordStartBeat = getChordPlaybackStartBeat(chord);
     const chordNoteCount = clampInt(chord.noteCount, chordTypeObj(chord.type).intervals.length, 1, 16);
-    if (chord.chordsIn !== false) playChordNotes(chord.root, chord.type, time, chord.beats || 4, chord.chordRepeat || 1, chordStartBeat, chord.arpMode || 'off', chordNoteCount);
-    if (song.bassEnabled && chord.bassIn !== false) playBassNote(getChordBassRoot(chord), time, chord.beats || 4, chord.bassRepeat || 1, chordStartBeat);
+    if (chord.chordsIn !== false) playChordNotes(chord.root, chord.type, time, chord.beats || 4, chord.chordRepeat || 1, chordStartBeat, chord.arpMode || 'off', chordNoteCount, transportStep);
+    if (song.bassEnabled && chord.bassIn !== false) playBassNote(getChordBassRoot(chord), time, chord.beats || 4, chord.bassRepeat || 1, chordStartBeat, transportStep);
     if (song.stringEnabled && chord.stringsIn !== false) playStringNotes(
       getChordStringRoot(chord),
       chord.type,
@@ -5040,6 +5196,7 @@ function scheduleMusicalBeat(time) {
       chord.stringRepeat || chord.chordRepeat || 1,
       chordStartBeat,
       chordNoteCount,
+      transportStep,
     );
   }
 
@@ -5084,7 +5241,7 @@ function scheduler(generation = schedulerGeneration) {
     }
     applyAmpLfoAtStep(nextNoteTime, transportStep, currentLfoPatternIds);
     scheduleStep((currentBeatStepBase + beatSubdivision) % STEPS, nextNoteTime, currentDrumPatternId);
-    if (beatSubdivision === 0 && isBeating) scheduleMusicalBeat(nextNoteTime);
+    if (beatSubdivision === 0 && isBeating) scheduleMusicalBeat(nextNoteTime, transportStep);
     const secondsPerSixteenth = (60 / song.bpm) / 4;
     nextNoteTime += secondsPerSixteenth;
     currentStep = (currentStep + 1) % STEPS;
@@ -6363,7 +6520,7 @@ function buildSynthCard(kind) {
     ));
     SYNTH_UI_FIELDS.forEach(field => controlsGrid.appendChild(buildSynthSlider(kind, synth, field)));
     controlsGrid.appendChild(buildReverbSlider(kind));
-    controlsGrid.appendChild(buildFilterLfoControls(kind, synth));
+    controlsGrid.appendChild(buildSynthLfoModulationControls(kind));
 
     card.append(detailGrid, controlsGrid);
   }
@@ -6426,58 +6583,93 @@ function buildReverbSlider(kind) {
   return row;
 }
 
-function buildFilterLfoControls(kind, synth) {
+function buildSynthLfoModulationControls(kind) {
+  const synth = getSynthByKind(kind);
   const wrap = document.createElement('div');
-  wrap.className = 'synth-slider filter-lfo-controls';
+  wrap.className = 'synth-slider synth-lfo-modulations';
   wrap.style.gridColumn = '1 / -1';
 
   const top = document.createElement('div');
   top.className = 'synth-slider-top';
   const label = document.createElement('span');
-  label.textContent = 'Filter LFO';
+  label.textContent = 'Synth LFO Mods';
+  const helper = document.createElement('span');
+  helper.className = 'synth-slider-value';
+  helper.textContent = 'Cutoff • Q • Decay';
+  top.append(label, helper);
 
-  const enabledLabel = document.createElement('label');
-  enabledLabel.className = 'checkbox-inline';
-  const enabledInput = document.createElement('input');
-  enabledInput.type = 'checkbox';
-  enabledInput.checked = Boolean(synth.filterLfoEnabled);
-  enabledInput.setAttribute('aria-label', `${kind} filter LFO enabled`);
-  enabledInput.addEventListener('change', () => {
-    updateSynthFilterLfoField(kind, 'filterLfoEnabled', enabledInput.checked);
-    depthInput.disabled = !enabledInput.checked;
-    depthValue.style.opacity = enabledInput.checked ? '' : '0.4';
+  const grid = document.createElement('div');
+  grid.className = 'synth-lfo-mod-grid';
+
+  SYNTH_LFO_TARGETS.forEach(target => {
+    const modulation = getSynthLfoModulation(kind, target);
+    const config = SYNTH_LFO_TARGET_CONFIG[target];
+    const row = document.createElement('div');
+    row.className = 'synth-lfo-mod-row';
+
+    const targetLabel = document.createElement('span');
+    targetLabel.className = 'synth-lfo-mod-target';
+    targetLabel.textContent = config.label;
+
+    const enabledLabel = document.createElement('label');
+    enabledLabel.className = 'checkbox-inline synth-lfo-mod-toggle';
+    const enabledInput = document.createElement('input');
+    enabledInput.type = 'checkbox';
+    enabledInput.checked = Boolean(modulation?.enabled);
+    enabledInput.setAttribute('aria-label', `${kind} ${config.label} LFO enabled`);
+    enabledLabel.append(enabledInput, document.createTextNode('On'));
+
+    const patternSelect = document.createElement('select');
+    patternSelect.id = `synth-lfo-pattern-${kind}-${target}`;
+    patternSelect.dataset.synthKind = kind;
+    patternSelect.dataset.includeFollowAssigned = 'true';
+    patternSelect.className = 'synth-lfo-pattern-select';
+    patternSelect.setAttribute('aria-label', `${kind} ${config.label} LFO pattern`);
+    getAvailableLfoPatternOptions({ includeFollowAssigned: true, kind }).forEach(optionConfig => {
+      const option = document.createElement('option');
+      option.value = optionConfig.value;
+      option.textContent = optionConfig.label;
+      patternSelect.appendChild(option);
+    });
+    patternSelect.value = normalizeSynthLfoPatternId(modulation?.patternId, getDefaultLfoPatternId(), true) || patternSelect.options[0]?.value || '';
+
+    const depthWrap = document.createElement('div');
+    depthWrap.className = 'synth-lfo-depth-wrap';
+    const depthInput = document.createElement('input');
+    depthInput.type = 'range';
+    depthInput.min = '0';
+    depthInput.max = '1';
+    depthInput.step = '0.01';
+    depthInput.value = String(clampNumber(modulation?.depth, 0, 0, 1));
+    depthInput.setAttribute('aria-label', `${kind} ${config.label} LFO depth`);
+    const depthValue = document.createElement('span');
+    depthValue.className = 'synth-slider-value';
+    depthValue.textContent = `${Math.round(clampNumber(modulation?.depth, 0, 0, 1) * 100)}%`;
+
+    const syncDisabledState = () => {
+      const disabled = !enabledInput.checked;
+      patternSelect.disabled = disabled;
+      depthInput.disabled = disabled;
+      depthValue.style.opacity = disabled ? '0.45' : '';
+    };
+
+    enabledInput.addEventListener('change', () => {
+      updateSynthLfoModulationField(kind, target, 'enabled', enabledInput.checked);
+      syncDisabledState();
+    });
+    patternSelect.addEventListener('change', () => updateSynthLfoModulationField(kind, target, 'patternId', patternSelect.value));
+    depthInput.addEventListener('input', () => {
+      depthValue.textContent = `${Math.round(Number(depthInput.value) * 100)}%`;
+      updateSynthLfoModulationField(kind, target, 'depth', depthInput.value);
+    });
+
+    depthWrap.append(depthInput, depthValue);
+    row.append(targetLabel, enabledLabel, patternSelect, depthWrap);
+    syncDisabledState();
+    grid.appendChild(row);
   });
-  enabledLabel.append(enabledInput, document.createTextNode('On'));
-  top.append(label, enabledLabel);
 
-  const depthRow = document.createElement('div');
-  depthRow.style.display = 'flex';
-  depthRow.style.alignItems = 'center';
-  depthRow.style.gap = '0.5rem';
-  const depthLabel = document.createElement('span');
-  depthLabel.textContent = 'Depth';
-  depthLabel.style.fontSize = '0.75rem';
-  depthLabel.style.color = 'var(--text-muted)';
-  const depthValue = document.createElement('span');
-  depthValue.className = 'synth-slider-value';
-  depthValue.textContent = `${Math.round(synth.filterLfoDepth * 100)}%`;
-  if (!synth.filterLfoEnabled) depthValue.style.opacity = '0.4';
-  const depthInput = document.createElement('input');
-  depthInput.type = 'range';
-  depthInput.min = '0';
-  depthInput.max = '1';
-  depthInput.step = '0.01';
-  depthInput.value = String(synth.filterLfoDepth);
-  depthInput.disabled = !synth.filterLfoEnabled;
-  depthInput.style.flex = '1';
-  depthInput.setAttribute('aria-label', `${kind} filter LFO depth`);
-  depthInput.addEventListener('input', () => {
-    depthValue.textContent = `${Math.round(Number(depthInput.value) * 100)}%`;
-    updateSynthFilterLfoField(kind, 'filterLfoDepth', depthInput.value);
-  });
-  depthRow.append(depthLabel, depthInput, depthValue);
-
-  wrap.append(top, depthRow);
+  wrap.append(top, grid);
   return wrap;
 }
 
